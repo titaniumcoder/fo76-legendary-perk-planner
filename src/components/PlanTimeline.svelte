@@ -4,16 +4,6 @@
 
   let { plan }: { plan: PlanResult } = $props();
 
-  const grouped = $derived.by(() => {
-    const groups: Array<{ level: number; events: PlanEvent[] }> = [];
-    for (const e of plan.events) {
-      const last = groups[groups.length - 1];
-      if (last && last.level === e.level) last.events.push(e);
-      else groups.push({ level: e.level, events: [e] });
-    }
-    return groups;
-  });
-
   const summary = $derived(
     plan.finishedAtLevel !== null
       ? `all 4★ @ LVL ${fmt(plan.finishedAtLevel)}`
@@ -25,7 +15,7 @@
 
 <div class="panel">
   <div class="panel-title">Plan timeline <span class="sum">{summary} · need {fmt(plan.totalCoinsNeeded)}</span></div>
-  {#if grouped.length === 0}
+  {#if plan.events.length === 0}
     <div class="empty">
       {#if plan.stalled}
         Coin income is zero with the current assumptions.
@@ -37,16 +27,11 @@
     </div>
   {:else}
     <div class="timeline">
-      {#each grouped as g (g.level)}
-        <div class="lvlrow"><span class="lvl">LVL {fmt(g.level)}</span></div>
-        {#each g.events as e, i (i)}
-          <div class="ev">
-            <span class="card" title={e.cardName}>{e.cardName}</span>
-            <span class="rank">{e.fromRank}★→{e.toRank}★</span>
-            <span class="cost">−{fmt(e.cost)}</span>
-            <span class="left">· {fmt(e.coinsAfter)} left</span>
-          </div>
-        {/each}
+      {#each plan.events as e (e.level + e.cardId + e.toRank)}
+        <div class="ev" title="{e.cardName} → {e.toRank}★ at level {fmt(e.level)} (−{fmt(e.cost)} coins)">
+          <span class="what">{e.cardName} <span class="stars">{'★'.repeat(e.toRank)}</span></span>
+          <span class="lvl">{fmt(e.level)}</span>
+        </div>
       {/each}
     </div>
   {/if}
@@ -70,26 +55,14 @@
     max-height: 46vh;
     overflow-y: auto;
   }
-  .lvlrow {
-    font-family: var(--font-head);
-    font-weight: 700;
-    font-size: 12px;
-    letter-spacing: 0.1em;
-    color: var(--accent);
-    border-bottom: 1px solid var(--border-dim);
-    padding: 7px 0 2px;
-  }
-  .lvlrow:first-child {
-    padding-top: 0;
-  }
   .ev {
     display: flex;
     align-items: baseline;
-    gap: 6px;
-    padding: 3px 0 3px 10px;
+    gap: 8px;
+    padding: 3px 0;
     font-size: 12.5px;
   }
-  .card {
+  .what {
     color: var(--text);
     flex: 1;
     min-width: 0;
@@ -97,21 +70,16 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .rank {
-    color: var(--accent-dim);
+  .stars {
+    color: var(--accent);
+    letter-spacing: 1px;
+  }
+  .lvl {
     font-family: var(--font-head);
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-  }
-  .cost {
-    color: var(--danger);
     font-weight: 700;
-    white-space: nowrap;
-  }
-  .left {
-    color: var(--text-faint);
-    font-size: 11px;
+    font-size: 13px;
+    letter-spacing: 0.06em;
+    color: var(--accent-dim);
     white-space: nowrap;
   }
 </style>
