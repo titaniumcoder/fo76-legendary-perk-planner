@@ -1,23 +1,22 @@
 <script lang="ts">
   import { computePlan } from './lib/planner/planner';
   import { urlState } from './lib/state/urlState.svelte';
-  import { fmt } from './lib/utils/format';
-  import { hideImg } from './lib/utils/dom';
   import InputPanel from './components/InputPanel.svelte';
+  import ProjectionPanel from './components/ProjectionPanel.svelte';
   import CardPicker from './components/CardPicker.svelte';
   import SlotBoard from './components/SlotBoard.svelte';
   import PlanTimeline from './components/PlanTimeline.svelte';
-  import SummaryPanel from './components/SummaryPanel.svelte';
 
-  const baseUrl = import.meta.env.BASE_URL;
+  let copied = $state(false);
 
   const plan = $derived(
     computePlan({
       level: urlState.level,
       slotsUnlocked: urlState.slots,
       coinsOwned: urlState.coins,
-      cards: urlState.cards,
+      cards: urlState.plannerCards(),
       assumptions: urlState.assumptions,
+      rememberedRanks: urlState.ranks,
     }),
   );
 
@@ -26,17 +25,12 @@
     urlState.syncToUrl();
   });
 
-  const warnings = $derived.by(() => {
-    const w: string[] = [];
-    if (urlState.cards.length === 0) w.push('Add legendary cards to build a plan.');
-    if (urlState.level < 50 && urlState.cards.length > 0 && plan.availableSlotsNow === 0)
-      w.push(`No legendary slots at level ${urlState.level} — the first slot unlocks at level 50, the plan starts there.`);
-    if (urlState.cards.length > plan.availableSlotsNow && plan.nextSlotUnlock)
-      w.push(`Only ${plan.availableSlotsNow} slot${plan.availableSlotsNow === 1 ? '' : 's'} usable — card ${plan.availableSlotsNow + 1}+ waits for level ${plan.nextSlotUnlock.level}.`);
-    if (plan.stalled) w.push('Coin income is zero with the current assumptions — the plan cannot progress. Check the assumptions panel.');
-    if (plan.coinsWastedToCap > 0) w.push(`${fmt(plan.coinsWastedToCap)} coins were lost to the 5,000 cap — consider spending or a manual extra income assumption.`);
-    return w;
-  });
+  function copyLink() {
+    navigator.clipboard.writeText(urlState.currentUrl()).then(() => {
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    });
+  }
 </script>
 
 <header>
@@ -44,21 +38,21 @@
     <h1>Legendary Perk Planner</h1>
     <div class="sub">FALLOUT 76 · LEVEL → PERK COIN → 4★</div>
   </div>
-  <div class="coinbag" title="perk coins on hand">
-    <img src="{baseUrl}cards/perk-coin.webp" alt="" onerror={hideImg} />
-    <span>{fmt(urlState.coins)}</span>
+  <div class="actions">
+    <button onclick={copyLink}>{copied ? 'Copied!' : 'Copy plan link'}</button>
+    <button onclick={() => urlState.reset()}>Reset</button>
   </div>
 </header>
 
 <main>
   <aside>
     <InputPanel />
-    <CardPicker />
+    <ProjectionPanel {plan} />
+    <PlanTimeline {plan} />
   </aside>
   <section>
-    <SummaryPanel {plan} />
     <SlotBoard {plan} />
-    <PlanTimeline {plan} />
+    <CardPicker />
   </section>
 </main>
 
@@ -88,28 +82,16 @@
     color: var(--text-dim);
     margin-top: 2px;
   }
-  .coinbag {
+  .actions {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: var(--font-head);
-    font-weight: 700;
-    font-size: 20px;
-    color: var(--accent);
-    border: 1px solid var(--border-dim);
-    padding: 6px 14px;
-    background: var(--bg-inset);
-  }
-  .coinbag img {
-    width: 22px;
-    height: 22px;
+    gap: 8px;
   }
   main {
     display: grid;
-    grid-template-columns: 360px 1fr;
+    grid-template-columns: 320px 1fr;
     gap: 16px;
     padding: 16px 22px;
-    max-width: 1400px;
+    max-width: 1500px;
     margin: 0 auto;
   }
   aside,
@@ -122,16 +104,5 @@
     font-size: 12px;
     padding: 20px 22px 26px;
     border-top: 1px solid var(--border-dim);
-  }
-  @media (max-width: 980px) {
-    main {
-      grid-template-columns: 1fr;
-    }
-    aside {
-      order: 2;
-    }
-    section {
-      order: 1;
-    }
   }
 </style>

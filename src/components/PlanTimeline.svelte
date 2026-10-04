@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { urlState } from '../lib/state/urlState.svelte';
   import type { PlanResult, PlanEvent } from '../lib/planner/planner';
-  import { fmt, stars } from '../lib/utils/format';
+  import { fmt } from '../lib/utils/format';
 
   let { plan }: { plan: PlanResult } = $props();
 
@@ -14,16 +13,24 @@
     }
     return groups;
   });
+
+  const summary = $derived(
+    plan.finishedAtLevel !== null
+      ? `all 4★ @ LVL ${fmt(plan.finishedAtLevel)}`
+      : plan.stalled
+        ? 'stalled'
+        : 'in progress',
+  );
 </script>
 
 <div class="panel">
-  <div class="panel-title">Plan timeline</div>
+  <div class="panel-title">Plan timeline <span class="sum">{summary} · need {fmt(plan.totalCoinsNeeded)}</span></div>
   {#if grouped.length === 0}
     <div class="empty">
-      {#if urlState.cards.length === 0}
-        Add cards from the picker to generate a plan.
+      {#if plan.stalled}
+        Coin income is zero with the current assumptions.
       {:else if plan.allDone}
-        All selected cards are already 4★. 🏆
+        All selected cards are already 4★.
       {:else}
         No affordable upgrades yet — keep leveling.
       {/if}
@@ -31,14 +38,11 @@
   {:else}
     <div class="timeline">
       {#each grouped as g (g.level)}
-        <div class="lvlrow">
-          <span class="lvl">LVL {fmt(g.level)}</span>
-          {#if g.level <= urlState.level}<span class="now">NOW</span>{/if}
-        </div>
+        <div class="lvlrow"><span class="lvl">LVL {fmt(g.level)}</span></div>
         {#each g.events as e, i (i)}
           <div class="ev">
-            <span class="card">{e.cardName}</span>
-            <span class="rank">{e.fromRank}★ → {e.toRank}★</span>
+            <span class="card" title={e.cardName}>{e.cardName}</span>
+            <span class="rank">{e.fromRank}★→{e.toRank}★</span>
             <span class="cost">−{fmt(e.cost)}</span>
             <span class="left">· {fmt(e.coinsAfter)} left</span>
           </div>
@@ -49,44 +53,41 @@
 </div>
 
 <style>
+  .panel-title .sum {
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+    font-size: 11px;
+    margin-left: 6px;
+    text-transform: none;
+  }
   .empty {
     color: var(--text-faint);
     font-style: italic;
     padding: 6px 0;
   }
   .timeline {
-    max-height: 420px;
+    max-height: 46vh;
     overflow-y: auto;
   }
   .lvlrow {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
     font-family: var(--font-head);
     font-weight: 700;
-    font-size: 13px;
+    font-size: 12px;
     letter-spacing: 0.1em;
     color: var(--accent);
     border-bottom: 1px solid var(--border-dim);
-    padding: 8px 0 3px;
+    padding: 7px 0 2px;
   }
   .lvlrow:first-child {
     padding-top: 0;
   }
-  .now {
-    font-size: 9px;
-    background: var(--accent);
-    color: #111;
-    padding: 1px 5px;
-    border-radius: 2px;
-    letter-spacing: 0.12em;
-  }
   .ev {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    padding: 3px 0 3px 14px;
-    font-size: 13.5px;
+    gap: 6px;
+    padding: 3px 0 3px 10px;
+    font-size: 12.5px;
   }
   .card {
     color: var(--text);
@@ -99,8 +100,8 @@
   .rank {
     color: var(--accent-dim);
     font-family: var(--font-head);
-    font-size: 12px;
-    letter-spacing: 0.06em;
+    font-size: 11px;
+    letter-spacing: 0.04em;
     white-space: nowrap;
   }
   .cost {
@@ -110,7 +111,7 @@
   }
   .left {
     color: var(--text-faint);
-    font-size: 12px;
+    font-size: 11px;
     white-space: nowrap;
   }
 </style>

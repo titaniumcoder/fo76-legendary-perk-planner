@@ -3,32 +3,19 @@
   import { urlState } from '../lib/state/urlState.svelte';
   import CardTile from './CardTile.svelte';
 
-  const selectedIds = $derived(new Set(urlState.cards.map((c) => c.id)));
-  const full = $derived(urlState.cards.length >= 6);
-
-  function toggle(id: string) {
-    if (selectedIds.has(id)) {
-      urlState.cards = urlState.cards.filter((c) => c.id !== id);
-    } else if (!full) {
-      urlState.cards = [...urlState.cards, { id, rank: 1 }];
-    }
-  }
+  const selectedIds = $derived(new Set(urlState.order));
 </script>
 
 <div class="panel">
-  <div class="panel-title">Add legendary cards <span class="count">{urlState.cards.length}/6</span></div>
-  {#if full}
-    <div class="warn">Six cards selected — remove one to add another.</div>
-  {/if}
+  <div class="panel-title">Add legendary cards <span class="count">{urlState.order.length} selected</span></div>
   <div class="grid">
     {#each LEGENDARY_PERKS as perk (perk.id)}
       <button
         class="pick {selectedIds.has(perk.id) ? 'sel' : ''}"
-        onclick={() => toggle(perk.id)}
-        disabled={!selectedIds.has(perk.id) && full}
+        onclick={() => urlState.toggleCard(perk.id)}
         title={perk.ranks[0]}
       >
-        <CardTile perk={perk} rank={1} size="sm" />
+        <CardTile perk={perk} rank={urlState.rankOf(perk.id)} layout="row" />
       </button>
     {/each}
   </div>
@@ -58,15 +45,12 @@
     background: var(--bg-inset);
     border: 1px solid var(--border-dim);
   }
-  .pick:hover:not(:disabled) {
+  .pick:hover {
     border-color: var(--accent-dim);
     color: var(--text);
   }
   .pick.sel {
     border-color: var(--accent);
     background: rgba(255, 210, 0, 0.08);
-  }
-  .pick:disabled {
-    opacity: 0.35;
   }
 </style>

@@ -9,10 +9,12 @@ export interface LegendaryPerk {
   ghoulOnly: boolean;
   /** true for perks unusable by ghouls */
   humanOnly: boolean;
+  /** S.P.E.C.I.A.L. boosters get the "everyone to 2★ first" treatment in the planner */
+  statBoost: boolean;
   ranks: [string, string, string, string];
 }
 
-export const LEGENDARY_PERKS: LegendaryPerk[] = [
+const RAW: Array<Omit<LegendaryPerk, 'statBoost'>> = [
   {
     id: 'ammo-factory',
     name: 'Ammo Factory',
@@ -406,5 +408,7 @@ export const LEGENDARY_PERKS: LegendaryPerk[] = [
     ],
   },
 ];
+
+export const LEGENDARY_PERKS: LegendaryPerk[] = RAW.map((p) => ({ ...p, statBoost: p.special !== 'none' }));
 
 export const PERK_BY_ID = new Map(LEGENDARY_PERKS.map((p) => [p.id, p]));

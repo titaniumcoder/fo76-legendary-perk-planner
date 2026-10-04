@@ -51,13 +51,17 @@
     font-size: 12px;
   }
   .lg .pip {
-    font-size: 16px;
+    font-size: 21px;
   }
-  .pip[role='button'],
+  .lg {
+    gap: 4px;
+  }
   button.pip {
     cursor: pointer;
+    padding: 2px;
   }
   button.pip:hover {
     color: var(--accent-dim);
+    transform: scale(1.15);
   }
 </style>

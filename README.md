@@ -15,9 +15,10 @@ Single-screen webapp (Svelte 5 + TypeScript + Vite) that optimizes Fallout 76 le
 - Rank-up costs: **50 / 100 / 150** perk coins (300 total per card)
 - Coin income: 2 coins per level (scrapped perk pick, continues past 50) + 8 coins per perk pack
   (levels 4, 6, 8, 10, then every 5th level) + one-time +50 at level 50
-- Coins capped at 5,000; pack size and other constants are editable in the app's assumptions panel
-- Planner rule: all available cards get their first rank-up (50 coins) before any card is finished to 4★;
-  cards activate as slots become available, in priority order
+- Coins capped at 5,000; pack size and other constants live in `src/lib/planner/rules.ts`
+- Planner rules: stat-boost cards (Legendary S.P.E.C.I.A.L.) all get their first rank-up (50 coins)
+  before any card is finished; then every card is finished to 4★ strictly one after another in
+  priority order; rank progress is remembered per card even when swapped or removed
 
 State lives in the URL hash (`#s=...`) — no server, no localStorage; bookmark or share the link.
 

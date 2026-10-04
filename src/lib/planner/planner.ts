@@ -1,28 +1,20 @@
 import {
   COIN_CAP,
-  COINS_PER_PICK,
-  COINS_PER_PACK,
-  LEVEL_50_BONUS,
   MAX_LEVEL,
   MAX_RANK,
   RANK_UP_COSTS,
   SLOT_MILESTONES,
-  PACK_LEVELS,
-  FIRST_PICK_LEVEL,
+  DEFAULT_ASSUMPTIONS,
+  incomeForLevel,
   slotsUnlockedAtLevel,
+  type PlannerAssumptions,
 } from './rules';
-import { PERK_BY_ID } from '../data/legendaryPerks';
+import { LEGENDARY_PERKS, PERK_BY_ID } from '../data/legendaryPerks';
 
 export interface PlannerCard {
   id: string;
   /** current rank 1-4 */
   rank: number;
-}
-
-export interface PlannerAssumptions {
-  coinsPerPick: number;
-  coinsPerPack: number;
-  level50Bonus: number;
 }
 
 export interface PlannerInput {
@@ -33,10 +25,11 @@ export interface PlannerInput {
   /** priority order = array order */
   cards: PlannerCard[];
   assumptions: PlannerAssumptions;
+  /** remembered ranks for cards not currently in the list (rank memory) */
+  rememberedRanks?: Record<string, number>;
 }
 
-export interface PlanEvent {
-  level: number;
+export interface SpendEvent {
   cardId: string;
   cardName: string;
   fromRank: number;
@@ -45,11 +38,15 @@ export interface PlanEvent {
   coinsAfter: number;
 }
 
+export interface PlanEvent extends SpendEvent {
+  level: number;
+}
+
 export interface CardPlan {
   cardId: string;
   cardName: string;
-  /** level at which the card can first be equipped (current level if a slot is free now) */
-  activateAtLevel: number;
+  /** first level the card is equipped (null if never within horizon) */
+  activateAtLevel: number | null;
   /** level at which the card reaches 4★, or null if never within horizon */
   finishAtLevel: number | null;
   /** first planned upgrade beyond the card's input rank, if any */
@@ -76,23 +73,29 @@ export interface PlanResult {
   stalled: boolean;
 }
 
-export const DEFAULT_ASSUMPTIONS: PlannerAssumptions = {
-  coinsPerPick: COINS_PER_PICK,
-  coinsPerPack: COINS_PER_PACK,
-  level50Bonus: LEVEL_50_BONUS,
-};
+export type { PlannerAssumptions };
+export { DEFAULT_ASSUMPTIONS };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 function sanitize(input: PlannerInput): Required<PlannerInput> {
+  const seen = new Set<string>();
+  const cards: PlannerCard[] = [];
+  for (const c of input.cards) {
+    if (!PERK_BY_ID.has(c.id) || seen.has(c.id)) continue;
+    seen.add(c.id);
+    cards.push({ id: c.id, rank: clamp(Math.floor(c.rank) || 1, 1, MAX_RANK) });
+  }
+  const remembered: Record<string, number> = {};
+  for (const [id, rank] of Object.entries(input.rememberedRanks ?? {})) {
+    if (PERK_BY_ID.has(id) && !seen.has(id)) remembered[id] = clamp(Math.floor(rank) || 1, 1, MAX_RANK);
+  }
   return {
     level: clamp(Math.floor(input.level) || 1, 1, MAX_LEVEL),
     slotsUnlocked: clamp(Math.floor(input.slotsUnlocked) || 0, 0, 6),
     coinsOwned: clamp(Math.floor(input.coinsOwned) || 0, 0, COIN_CAP),
-    cards: input.cards
-      .filter((c) => PERK_BY_ID.has(c.id))
-      .slice(0, 6)
-      .map((c) => ({ id: c.id, rank: clamp(Math.floor(c.rank) || 1, 1, MAX_RANK) })),
+    cards,
+    rememberedRanks: remembered,
     assumptions: {
       coinsPerPick: Math.max(0, input.assumptions?.coinsPerPick ?? DEFAULT_ASSUMPTIONS.coinsPerPick),
       coinsPerPack: Math.max(0, input.assumptions?.coinsPerPack ?? DEFAULT_ASSUMPTIONS.coinsPerPack),
@@ -102,96 +105,100 @@ function sanitize(input: PlannerInput): Required<PlannerInput> {
 }
 
 /**
- * Simulate level-by-level coin income and greedy spending.
- *
- * Phase A: every active 1★ card gets its first rank-up (50 coins) before anything else,
- *          in priority order — "spread the first-ups" (even if an earlier card is
- *          temporarily unaffordable, later affordable 1★ cards still get theirs).
- * Phase B: then finish cards to 4★ in priority order.
+ * Cards equipped in slots at a given moment: walk the priority order, a card fits
+ * while free slots remain; a maxed card is swapped out (its rank is remembered),
+ * freeing the slot for the next card.
  */
+export function equippedCardIds(order: string[], ranks: Record<string, number>, slots: number): string[] {
+  const equipped: string[] = [];
+  let freed = 0;
+  for (let k = 0; k < order.length; k++) {
+    if (k - freed >= slots) break;
+    equipped.push(order[k]);
+    if ((ranks[order[k]] ?? 1) >= MAX_RANK) freed++;
+  }
+  return equipped;
+}
+
+/**
+ * Greedy spending at one level:
+ * Phase A — every equipped stat-boost card still at 1★ gets its first-up (50 coins),
+ *           in priority order, before anything is finished.
+ * Phase B — strict queue: cards are taken to 4★ one after another in priority order;
+ *           an unaffordable step blocks all later cards.
+ */
+export function spendAtLevel(
+  coins: number,
+  cards: PlannerCard[],
+): { coins: number; ranks: Record<string, number>; events: SpendEvent[] } {
+  const ranks = new Map(cards.map((c) => [c.id, c.rank]));
+  const events: SpendEvent[] = [];
+
+  for (const c of cards) {
+    if (ranks.get(c.id) !== 1) continue;
+    if (!PERK_BY_ID.get(c.id)?.statBoost) continue;
+    const cost = RANK_UP_COSTS[0];
+    if (coins < cost) continue;
+    coins -= cost;
+    ranks.set(c.id, 2);
+    events.push({ cardId: c.id, cardName: PERK_BY_ID.get(c.id)!.name, fromRank: 1, toRank: 2, cost, coinsAfter: coins });
+  }
+
+  queue: for (const c of cards) {
+    let rank = ranks.get(c.id)!;
+    while (rank < MAX_RANK) {
+      const cost = RANK_UP_COSTS[rank - 1];
+      if (coins < cost) break queue;
+      coins -= cost;
+      events.push({
+        cardId: c.id,
+        cardName: PERK_BY_ID.get(c.id)!.name,
+        fromRank: rank,
+        toRank: rank + 1,
+        cost,
+        coinsAfter: coins,
+      });
+      rank++;
+      ranks.set(c.id, rank);
+    }
+  }
+
+  return { coins, ranks: Object.fromEntries(ranks), events };
+}
+
 export function computePlan(raw: PlannerInput): PlanResult {
   const input = sanitize(raw);
-  const { level, assumptions } = input;
+  const { level, assumptions, cards } = input;
+  const order = cards.map((c) => c.id);
+  const ranks: Record<string, number> = Object.fromEntries(cards.map((c) => [c.id, c.rank]));
 
-  const availableSlotsNow = Math.max(input.slotsUnlocked, slotsUnlockedAtLevel(level));
-
-  // card k (priority index) becomes active when a slot is available for it
-  const activateAt = (k: number): number | null => {
-    if (k >= 6) return null;
-    if (k < availableSlotsNow) return level;
-    return SLOT_MILESTONES[k];
-  };
-
-  const ranks = new Map<string, number>(input.cards.map((c) => [c.id, c.rank]));
-  const activeAt = new Map<string, number>();
-  input.cards.forEach((c, k) => {
-    const at = activateAt(k);
-    if (at !== null) activeAt.set(c.id, at);
-  });
+  const slotsAt = (n: number) => Math.max(input.slotsUnlocked, slotsUnlockedAtLevel(n));
 
   const events: PlanEvent[] = [];
   let coins = input.coinsOwned;
   let coinsEarnedTotal = 0;
   let coinsWastedToCap = 0;
   let totalCoinsNeeded = 0;
+  const firstEquipped = new Map<string, number>();
 
-  const activeCardsAt = (n: number): string[] =>
-    input.cards.filter((c) => {
-      const at = activeAt.get(c.id);
-      return at !== undefined && at <= n;
-    }).map((c) => c.id);
-
-  const rankCost = (rank: number): number | null => (rank >= MAX_RANK ? null : RANK_UP_COSTS[rank - 1]);
-
-  /** spend greedily at level n: phase A first-ups, then phase B finishing */
-  const spend = (n: number) => {
-    // Phase A
-    for (const id of activeCardsAt(n)) {
-      const rank = ranks.get(id)!;
-      if (rank !== 1) continue;
-      const cost = rankCost(1)!;
-      if (coins >= cost) {
-        coins -= cost;
-        totalCoinsNeeded += cost;
-        events.push({
-          level: n,
-          cardId: id,
-          cardName: PERK_BY_ID.get(id)!.name,
-          fromRank: 1,
-          toRank: 2,
-          cost,
-          coinsAfter: coins,
-        });
-        ranks.set(id, 2);
+  const doLevel = (n: number) => {
+    for (;;) {
+      const equipped = equippedCardIds(order, ranks, slotsAt(n));
+      for (const id of equipped) if (!firstEquipped.has(id)) firstEquipped.set(id, n);
+      const res = spendAtLevel(coins, equipped.map((id) => ({ id, rank: ranks[id] })));
+      if (res.events.length === 0) break;
+      coins = res.coins;
+      for (const ev of res.events) {
+        totalCoinsNeeded += ev.cost;
+        events.push({ ...ev, level: n });
       }
-    }
-    // Phase B
-    for (const id of activeCardsAt(n)) {
-      let rank = ranks.get(id)!;
-      while (rank < MAX_RANK) {
-        const cost = rankCost(rank)!;
-        if (coins < cost) break;
-        coins -= cost;
-        totalCoinsNeeded += cost;
-        events.push({
-          level: n,
-          cardId: id,
-          cardName: PERK_BY_ID.get(id)!.name,
-          fromRank: rank,
-          toRank: rank + 1,
-          cost,
-          coinsAfter: coins,
-        });
-        rank += 1;
-        ranks.set(id, rank);
-      }
+      for (const [id, rank] of Object.entries(res.ranks)) ranks[id] = rank;
     }
   };
 
-  const allMaxed = () => input.cards.every((c) => (ranks.get(c.id) ?? 1) >= MAX_RANK);
+  doLevel(level);
 
-  // spend at the current level with coins on hand
-  spend(level);
+  const allMaxed = () => order.length > 0 && order.every((id) => ranks[id] >= MAX_RANK);
 
   let finishedAtLevel: number | null = allMaxed() ? level : null;
   let stalled = false;
@@ -199,11 +206,7 @@ export function computePlan(raw: PlannerInput): PlanResult {
   if (finishedAtLevel === null) {
     let stagnant = 0;
     for (let n = level + 1; n <= MAX_LEVEL; n++) {
-      let income = 0;
-      if (n >= FIRST_PICK_LEVEL) income += assumptions.coinsPerPick;
-      if (PACK_LEVELS.has(n)) income += assumptions.coinsPerPack;
-      if (n === 50 && level < 50) income += assumptions.level50Bonus;
-
+      const income = incomeForLevel(n, assumptions, level);
       if (income === 0) {
         stagnant++;
         if (stagnant > 1000) {
@@ -218,7 +221,7 @@ export function computePlan(raw: PlannerInput): PlanResult {
         coins = Math.min(COIN_CAP, coins + income);
       }
 
-      spend(n);
+      doLevel(n);
 
       if (allMaxed()) {
         finishedAtLevel = n;
@@ -227,8 +230,7 @@ export function computePlan(raw: PlannerInput): PlanResult {
     }
   }
 
-  const cardPlans: CardPlan[] = input.cards.map((c) => {
-    const at = activeAt.get(c.id);
+  const cardPlans: CardPlan[] = cards.map((c) => {
     let finish: number | null = null;
     for (const e of events) {
       if (e.cardId === c.id && e.toRank === MAX_RANK) finish = e.level;
@@ -241,16 +243,15 @@ export function computePlan(raw: PlannerInput): PlanResult {
     return {
       cardId: c.id,
       cardName: PERK_BY_ID.get(c.id)!.name,
-      activateAtLevel: at ?? MAX_LEVEL,
-      finishAtLevel: at === undefined ? null : finish,
+      activateAtLevel: firstEquipped.get(c.id) ?? null,
+      finishAtLevel: finish,
       nextStep,
     };
   });
 
+  const availableSlotsNow = slotsAt(level);
   const nextSlotUnlock =
-    availableSlotsNow < 6
-      ? { level: SLOT_MILESTONES[availableSlotsNow], slotIndex: availableSlotsNow + 1 }
-      : null;
+    availableSlotsNow < 6 ? { level: SLOT_MILESTONES[availableSlotsNow], slotIndex: availableSlotsNow + 1 } : null;
 
   return {
     events,
@@ -264,4 +265,23 @@ export function computePlan(raw: PlannerInput): PlanResult {
     nextSlotUnlock,
     stalled,
   };
+}
+
+/**
+ * Full-pool projection: every legendary perk usable by the chosen faction
+ * (selected cards keep their priority + ranks, the rest follow in data order)
+ * leveled to 4★ with the same planner.
+ */
+export function fullPoolProjection(
+  input: PlannerInput,
+  faction: 'human' | 'ghoul',
+): { finishedAtLevel: number | null; totalCoinsNeeded: number } {
+  const input0 = sanitize(input);
+  const selectedIds = new Set(input0.cards.map((c) => c.id));
+  const pool = LEGENDARY_PERKS.filter((p) => (faction === 'human' ? !p.ghoulOnly : !p.humanOnly));
+  const rest = pool
+    .filter((p) => !selectedIds.has(p.id))
+    .map((p) => ({ id: p.id, rank: input0.rememberedRanks[p.id] ?? 1 }));
+  const plan = computePlan({ ...input, cards: [...input0.cards, ...rest] });
+  return { finishedAtLevel: plan.finishedAtLevel, totalCoinsNeeded: plan.totalCoinsNeeded };
 }

@@ -3,28 +3,32 @@
   import { hideImg } from '../lib/utils/dom';
   import StarPips from './StarPips.svelte';
 
-  const baseUrl = import.meta.env.BASE_URL;
-
   let {
     perk,
     rank,
-    size = 'md',
+    layout = 'row',
     locked = false,
     lockLevel = null,
     note = '',
     active = false,
+    interactive = false,
+    onrankchange,
   }: {
     perk: LegendaryPerk;
     rank: number;
-    size?: 'sm' | 'md';
+    layout?: 'row' | 'column';
     locked?: boolean;
     lockLevel?: number | null;
     note?: string;
     active?: boolean;
+    interactive?: boolean;
+    onrankchange?: (rank: number) => void;
   } = $props();
+
+  const baseUrl = import.meta.env.BASE_URL;
 </script>
 
-<div class="tile {size} {locked ? 'locked' : ''} {active ? 'active' : ''}">
+<div class="tile {layout} {locked ? 'locked' : ''} {active ? 'active' : ''}">
   <div class="art">
     <img src="{baseUrl}cards/{perk.image}.webp" alt={perk.name} loading="lazy" onerror={hideImg} />
     <div class="fallback">?</div>
@@ -36,7 +40,7 @@
   </div>
   <div class="meta">
     <div class="name" title={perk.name}>{perk.name}</div>
-    <StarPips {rank} size={size === 'sm' ? 'sm' : 'md'} />
+    <StarPips {rank} size={layout === 'column' ? 'lg' : 'sm'} {interactive} onchange={onrankchange} />
     {#if note}
       <div class="note">{note}</div>
     {/if}
@@ -64,10 +68,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-  .md .art {
-    width: 62px;
-    height: 76px;
   }
   .art img {
     position: absolute;
@@ -140,5 +140,37 @@
   }
   .active .name {
     color: var(--accent);
+  }
+
+  .tile.column {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .column .art {
+    width: 100%;
+    height: 96px;
+  }
+  .column .meta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    text-align: center;
+  }
+  .column .name {
+    white-space: normal;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    font-size: 11.5px;
+    line-height: 1.2;
+    min-height: 28px;
+  }
+  .column .note {
+    font-size: 10.5px;
+    min-height: 13px;
   }
 </style>
