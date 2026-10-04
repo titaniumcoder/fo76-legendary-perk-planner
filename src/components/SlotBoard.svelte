@@ -25,9 +25,24 @@
       } else if (locked) {
         note = 'waits for slot';
       }
+      if (urlState.mode === 'regular' && !locked && urlState.rankOf(id) < 4) {
+        const cost = urlState.nextRankCost(id);
+        if (cost !== null) note = `buy ${cost}` + (urlState.canBuy(id) ? '' : ' · not affordable');
+        else note = 'maxed';
+      }
       return { id, perk, cp, locked, note, index: i };
     }).filter((r) => r !== null),
   );
+
+  /** REGULAR mode: per-star clickability gate — only the next star, when affordable */
+  function buyableGate(id: string) {
+    return (starIndex: number) => starIndex === urlState.rankOf(id) && urlState.canBuy(id);
+  }
+
+  function onStar(id: string, rank: number) {
+    if (urlState.mode === 'regular') urlState.buy(id);
+    else urlState.setRank(id, rank);
+  }
 
   function handleDrop(target: number) {
     const from = dragIndex;
@@ -40,7 +55,12 @@
 </script>
 
 <div class="panel">
-  <div class="panel-title">Priority board <span class="sub">drag to swap · click the stars to set rank</span></div>
+  <div class="panel-title">
+    Priority board
+    <span class="sub">
+      {urlState.mode === 'regular' ? 'drag to swap · click the next ★ to buy · grey = not affordable / locked' : 'drag to swap · click the stars to set rank'}
+    </span>
+  </div>
 
   <div class="board">
     {#each rows as row (row.id)}
@@ -70,7 +90,8 @@
           note={row.note}
           active={!row.locked}
           interactive
-          onrankchange={(r) => urlState.setRank(row.id, r)}
+          buyable={urlState.mode === 'regular' ? buyableGate(row.id) : null}
+          onrankchange={(r) => onStar(row.id, r)}
         />
         <button
           class="remove"

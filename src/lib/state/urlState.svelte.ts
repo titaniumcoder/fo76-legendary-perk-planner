@@ -1,7 +1,7 @@
-import { COIN_CAP, DEFAULT_ASSUMPTIONS, MAX_LEVEL, MAX_RANK, incomeForLevel, slotsUnlockedAtLevel, type PlannerAssumptions } from '../planner/rules';
-import { equippedCardIds, spendAtLevel, type PlannerCard } from '../planner/planner';
+import { COIN_CAP, DEFAULT_ASSUMPTIONS, MAX_LEVEL, MAX_RANK, RANK_UP_COSTS, incomeForLevel, slotsUnlockedAtLevel, type PlannerAssumptions } from '../planner/rules';
+import { equippedCardIds, type PlannerCard } from '../planner/planner';
 import { PERK_BY_ID } from '../data/legendaryPerks';
-import { clampRank, decodeState, encodeState, type AppState, type Faction } from '../utils/codec';
+import { clampRank, decodeState, encodeState, type AppState, type Faction, type Mode } from '../utils/codec';
 
 const DEBOUNCE_MS = 200;
 
@@ -31,6 +31,7 @@ function initialState(): AppState {
     ranks: {},
     assumptions: { ...DEFAULT_ASSUMPTIONS },
     faction: 'human',
+    mode: 'setup',
   };
 }
 
@@ -42,6 +43,7 @@ class UrlState {
   ranks = $state<Record<string, number>>({});
   assumptions = $state<PlannerAssumptions>({ ...DEFAULT_ASSUMPTIONS });
   faction = $state<Faction>('human');
+  mode = $state<Mode>('setup');
 
   #timer: ReturnType<typeof setTimeout> | undefined;
   #lastWritten = '';
@@ -56,6 +58,7 @@ class UrlState {
     this.ranks = s.ranks;
     this.assumptions = s.assumptions;
     this.faction = s.faction;
+    this.mode = s.mode;
 
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', () => this.#adoptFromUrl());
@@ -77,6 +80,7 @@ class UrlState {
     this.ranks = n.ranks;
     this.assumptions = n.assumptions;
     this.faction = n.faction;
+    this.mode = n.mode;
     this.#adopting = false;
   }
 
@@ -101,6 +105,7 @@ class UrlState {
       ranks: { ...this.ranks },
       assumptions: { ...this.assumptions },
       faction: this.faction,
+      mode: this.mode,
     };
   }
 
@@ -112,17 +117,43 @@ class UrlState {
     return this.ranks[id] ?? 1;
   }
 
-  /** one level: gain coin income for the new level, then auto-buy planned upgrades */
+  /** one level: gain coin income only — spending is a human decision in REGULAR mode */
   levelUp() {
     if (this.level >= MAX_LEVEL) return;
     const next = this.level + 1;
     this.coins = Math.min(COIN_CAP, this.coins + incomeForLevel(next, this.assumptions, this.level));
     this.level = next;
-    const slotsNow = Math.max(this.slots, slotsUnlockedAtLevel(next));
-    const equipped = equippedCardIds(this.order, this.ranks, slotsNow);
-    const res = spendAtLevel(this.coins, equipped.map((id) => ({ id, rank: this.ranks[id] ?? 1 })));
-    this.coins = res.coins;
-    this.ranks = { ...this.ranks, ...res.ranks };
+  }
+
+  /** card is equipped in an available slot at the current level/slots */
+  isEquipped(id: string): boolean {
+    const slotsNow = Math.max(this.slots, slotsUnlockedAtLevel(this.level));
+    return equippedCardIds(this.order, this.ranks, slotsNow).includes(id);
+  }
+
+  /** REGULAR mode: next rank-up is affordable and the card is currently equipped */
+  canBuy(id: string): boolean {
+    const rank = this.rankOf(id);
+    if (!this.order.includes(id) || rank >= MAX_RANK) return false;
+    if (!this.isEquipped(id)) return false;
+    return this.coins >= RANK_UP_COSTS[rank - 1];
+  }
+
+  nextRankCost(id: string): number | null {
+    const rank = this.rankOf(id);
+    return rank >= MAX_RANK ? null : RANK_UP_COSTS[rank - 1];
+  }
+
+  /** REGULAR mode: spend the coins for the next rank-up */
+  buy(id: string) {
+    if (!this.canBuy(id)) return;
+    const cost = RANK_UP_COSTS[(this.rankOf(id)) - 1];
+    this.coins -= cost;
+    this.setRank(id, this.rankOf(id) + 1);
+  }
+
+  setMode(mode: Mode) {
+    this.mode = mode;
   }
 
   toggleCard(id: string) {
@@ -141,9 +172,7 @@ class UrlState {
 
   setRank(id: string, rank: number) {
     this.ranks = { ...this.ranks, [id]: clampRank(rank) };
-  }
-
-  swap(i: number, j: number) {
+  }  swap(i: number, j: number) {
     if (i === j || i < 0 || j < 0 || i >= this.order.length || j >= this.order.length) return;
     const arr = [...this.order];
     [arr[i], arr[j]] = [arr[j], arr[i]];

@@ -2,6 +2,7 @@ import { DEFAULT_ASSUMPTIONS, type PlannerAssumptions } from '../planner/rules';
 import { PERK_BY_ID } from '../data/legendaryPerks';
 
 export type Faction = 'human' | 'ghoul';
+export type Mode = 'setup' | 'regular';
 
 export interface AppState {
   level: number;
@@ -13,9 +14,13 @@ export interface AppState {
   ranks: Record<string, number>;
   assumptions: PlannerAssumptions;
   faction: Faction;
+  mode: Mode;
 }
 
-const VERSION = 2;
+const VERSION = 3;
+
+/** v3 wire: [level, slots, coins, order[], ranks{}, assumptions(pick, pack, bonus), faction, mode] */
+type Wire3 = [number, number, number, string[], Record<string, number>, [number, number, number], number, number];
 
 /** v2 wire: [level, slots, coins, order[], ranks{}, assumptions(pick, pack, bonus), faction] */
 type Wire2 = [number, number, number, string[], Record<string, number>, [number, number, number], number];
@@ -39,7 +44,7 @@ function base64urlDecode(s: string): Uint8Array {
 }
 
 export function encodeState(state: AppState): string {
-  const wire: Wire2 = [
+  const wire: Wire3 = [
     state.level,
     state.slots,
     state.coins,
@@ -47,6 +52,7 @@ export function encodeState(state: AppState): string {
     state.ranks,
     [state.assumptions.coinsPerPick, state.assumptions.coinsPerPack, state.assumptions.level50Bonus],
     state.faction === 'ghoul' ? 1 : 0,
+    state.mode === 'regular' ? 1 : 0,
   ];
   return base64urlEncode(new TextEncoder().encode(JSON.stringify([VERSION, wire])));
 }
@@ -58,10 +64,11 @@ export function decodeState(hash: string): AppState | null {
     const parsed: unknown = JSON.parse(new TextDecoder().decode(base64urlDecode(raw)));
     if (!Array.isArray(parsed)) return null;
     if (parsed[0] === 1) return migrateV1(parsed[1]);
+    if (parsed[0] === 2) return migrateV2(parsed[1]);
     if (parsed[0] !== VERSION) return null;
-    const wire = parsed[1] as Wire2;
-    if (!Array.isArray(wire) || wire.length !== 7) return null;
-    const [level, slots, coins, order, ranks, assump, faction] = wire;
+    const wire = parsed[1] as Wire3;
+    if (!Array.isArray(wire) || wire.length !== 8) return null;
+    const [level, slots, coins, order, ranks, assump, faction, mode] = wire;
     if (!Array.isArray(order) || !assumpArrayOk(assump) || typeof ranks !== 'object' || ranks === null) return null;
     return {
       level: numOr(level, 1),
@@ -71,10 +78,27 @@ export function decodeState(hash: string): AppState | null {
       ranks: sanitizeRanks(ranks as Record<string, unknown>),
       assumptions: assumptionsFrom(assump),
       faction: faction === 1 ? 'ghoul' : 'human',
+      mode: mode === 1 ? 'regular' : 'setup',
     };
   } catch {
     return null;
   }
+}
+
+function migrateV2(wire: unknown): AppState | null {
+  if (!Array.isArray(wire) || wire.length !== 7) return null;
+  const [level, slots, coins, order, ranks, assump, faction] = wire as Wire2;
+  if (!Array.isArray(order) || !assumpArrayOk(assump) || typeof ranks !== 'object' || ranks === null) return null;
+  return {
+    level: numOr(level, 1),
+    slots: numOr(slots, 0),
+    coins: numOr(coins, 0),
+    order: order.filter((id) => typeof id === 'string' && PERK_BY_ID.has(id)),
+    ranks: sanitizeRanks(ranks as Record<string, unknown>),
+    assumptions: assumptionsFrom(assump),
+    faction: faction === 1 ? 'ghoul' : 'human',
+    mode: 'setup',
+  };
 }
 
 function migrateV1(wire: unknown): AppState | null {
@@ -96,6 +120,7 @@ function migrateV1(wire: unknown): AppState | null {
     ranks,
     assumptions: assumptionsFrom(assump),
     faction: 'human',
+    mode: 'setup',
   };
 }
 

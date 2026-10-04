@@ -12,6 +12,8 @@
     note = '',
     active = false,
     interactive = false,
+    /** REGULAR mode: only the next star is clickable, via per-star gate */
+    buyable = null,
     onrankchange,
   }: {
     perk: LegendaryPerk;
@@ -22,6 +24,7 @@
     note?: string;
     active?: boolean;
     interactive?: boolean;
+    buyable?: ((starIndex: number) => boolean) | null;
     onrankchange?: (rank: number) => void;
   } = $props();
 
@@ -40,7 +43,7 @@
   </div>
   <div class="meta">
     <div class="name" title={perk.name}>{perk.name}</div>
-    <StarPips {rank} size={layout === 'column' ? 'lg' : 'sm'} {interactive} onchange={onrankchange} />
+    <StarPips {rank} size={layout === 'column' ? 'lg' : 'sm'} {interactive} {buyable} onchange={onrankchange} />
     {#if note}
       <div class="note">{note}</div>
     {/if}

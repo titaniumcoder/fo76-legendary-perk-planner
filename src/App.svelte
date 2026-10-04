@@ -39,6 +39,10 @@
     <div class="sub">FALLOUT 76 · LEVEL → PERK COIN → 4★</div>
   </div>
   <div class="actions">
+    <div class="modeswitch" role="group" aria-label="mode">
+      <button class:sel={urlState.mode === 'setup'} onclick={() => urlState.setMode('setup')}>Setup</button>
+      <button class:sel={urlState.mode === 'regular'} onclick={() => urlState.setMode('regular')}>Regular</button>
+    </div>
     <button onclick={copyLink}>{copied ? 'Copied!' : 'Copy plan link'}</button>
     <button onclick={() => urlState.reset()}>Reset</button>
   </div>
@@ -85,6 +89,23 @@
   .actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+  }
+  .modeswitch {
+    display: flex;
+    margin-right: 10px;
+  }
+  .modeswitch button {
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+  .modeswitch button:first-child {
+    border-right: none;
+  }
+  .modeswitch button.sel {
+    background: linear-gradient(to bottom, #3a3320, #2a2517);
+    border-color: var(--accent);
+    color: var(--accent);
   }
   main {
     display: grid;

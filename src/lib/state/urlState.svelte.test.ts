@@ -7,19 +7,19 @@ describe('urlState', () => {
     expect([0, 1, 2, 3, 4, 5, 6]).toContain(urlState.slots);
   });
 
-  it('levelUp adds income and auto-buys planned upgrades', () => {
+  it('levelUp adds income only — ranks untouched (spending is manual)', () => {
     urlState.level = 49;
     urlState.slots = 6;
     urlState.coins = 0;
     urlState.order = ['ammo-factory'];
-    urlState.ranks = {};
+    urlState.ranks = { 'ammo-factory': 1 };
     urlState.levelUp();
     expect(urlState.level).toBe(50);
-    expect(urlState.coins).toBe(10);
-    expect(urlState.rankOf('ammo-factory')).toBe(2);
+    expect(urlState.coins).toBe(60);
+    expect(urlState.rankOf('ammo-factory')).toBe(1);
   });
 
-  it('levelUp applies the stat-card first-up before finishing', () => {
+  it('levelUp at a pack level adds pick + pack income', () => {
     urlState.level = 74;
     urlState.slots = 6;
     urlState.coins = 40;
@@ -27,9 +27,58 @@ describe('urlState', () => {
     urlState.ranks = {};
     urlState.levelUp();
     expect(urlState.level).toBe(75);
-    expect(urlState.coins).toBe(0);
-    expect(urlState.rankOf('legendary-luck')).toBe(2);
+    expect(urlState.coins).toBe(50);
+    expect(urlState.rankOf('legendary-luck')).toBe(1);
     expect(urlState.rankOf('ammo-factory')).toBe(1);
+  });
+
+  it('canBuy: affordable + equipped + not maxed', () => {
+    urlState.level = 300;
+    urlState.slots = 6;
+    urlState.coins = 50;
+    urlState.order = ['ammo-factory', 'legendary-luck'];
+    urlState.ranks = {};
+    expect(urlState.canBuy('ammo-factory')).toBe(true);
+    expect(urlState.canBuy('legendary-luck')).toBe(true);
+    urlState.buy('ammo-factory');
+    expect(urlState.rankOf('ammo-factory')).toBe(2);
+    expect(urlState.coins).toBe(0);
+    expect(urlState.canBuy('legendary-luck')).toBe(false);
+  });
+
+  it('canBuy: card waiting for a slot is not buyable even with coins', () => {
+    urlState.level = 34;
+    urlState.slots = 1;
+    urlState.coins = 500;
+    urlState.order = ['ammo-factory', 'legendary-luck'];
+    urlState.ranks = {};
+    expect(urlState.canBuy('legendary-luck')).toBe(false);
+    urlState.buy('legendary-luck');
+    expect(urlState.rankOf('legendary-luck')).toBe(1);
+  });
+
+  it('buy is a no-op when unaffordable and on maxed cards', () => {
+    urlState.level = 300;
+    urlState.slots = 6;
+    urlState.coins = 20;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = {};
+    urlState.buy('ammo-factory');
+    expect(urlState.rankOf('ammo-factory')).toBe(1);
+    expect(urlState.coins).toBe(20);
+    urlState.coins = 5000;
+    urlState.ranks = { 'ammo-factory': 4 };
+    expect(urlState.canBuy('ammo-factory')).toBe(false);
+    urlState.buy('ammo-factory');
+    expect(urlState.rankOf('ammo-factory')).toBe(4);
+    expect(urlState.coins).toBe(5000);
+  });
+
+  it('setMode persists in snapshot', () => {
+    urlState.mode = 'regular';
+    expect(urlState.snapshot().mode).toBe('regular');
+    urlState.mode = 'setup';
+    expect(urlState.snapshot().mode).toBe('setup');
   });
 
   it('rank is remembered when a card is removed and re-added', () => {

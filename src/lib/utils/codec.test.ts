@@ -10,6 +10,7 @@ const state: AppState = {
   ranks: { 'ammo-factory': 2, 'legendary-luck': 1, 'what-rads': 3 },
   assumptions: { coinsPerPick: 2, coinsPerPack: 8, level50Bonus: 50 },
   faction: 'ghoul',
+  mode: 'regular',
 };
 
 function b64url(bytes: Uint8Array): string {
@@ -38,6 +39,7 @@ describe('codec v2', () => {
       ranks: {},
       assumptions: { ...DEFAULT_ASSUMPTIONS },
       faction: 'human',
+      mode: 'setup',
     };
     expect(decodeState(encodeState(s))).toEqual(s);
   });
@@ -60,7 +62,23 @@ describe('codec v2', () => {
   });
 });
 
-describe('codec v1 migration', () => {
+describe('codec migrations', () => {
+  it('migrates v2 links: order + ranks, faction, mode → setup', () => {
+    const bytes = new TextEncoder().encode(
+      JSON.stringify([2, [42, 3, 77, ['ammo-factory', 'legendary-luck'], { 'ammo-factory': 2 }, [2, 8, 50], 1]]),
+    );
+    const out = decodeState(b64url(bytes))!;
+    expect(out).toMatchObject({
+      level: 42,
+      slots: 3,
+      coins: 77,
+      order: ['ammo-factory', 'legendary-luck'],
+      ranks: { 'ammo-factory': 2 },
+      faction: 'ghoul',
+      mode: 'setup',
+    });
+  });
+
   it('migrates v1 card-pair lists to order + ranks', () => {
     const bytes = new TextEncoder().encode(
       JSON.stringify([1, [42, 3, 77, [['ammo-factory', 2], ['legendary-luck', 1]], [2, 8, 50]]]),
@@ -73,6 +91,7 @@ describe('codec v1 migration', () => {
       order: ['ammo-factory', 'legendary-luck'],
       ranks: { 'ammo-factory': 2, 'legendary-luck': 1 },
       faction: 'human',
+      mode: 'setup',
     });
     expect(out.assumptions).toEqual({ coinsPerPick: 2, coinsPerPack: 8, level50Bonus: 50 });
   });
