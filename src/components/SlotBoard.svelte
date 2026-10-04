@@ -162,15 +162,20 @@
   }
   .remove {
     position: absolute;
-    top: 2px;
-    right: 2px;
-    padding: 0 5px;
+    top: 3px;
+    right: 3px;
+    padding: 2px 7px;
     font-size: 10px;
-    border: none;
-    background: none;
-    color: var(--text-faint);
+    font-weight: 700;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: rgba(10, 12, 13, 0.78);
+    color: var(--text);
+    z-index: 2;
   }
   .remove:hover {
+    background: rgba(10, 12, 13, 0.9);
     color: var(--danger);
+    border-color: var(--danger);
   }
 </style>

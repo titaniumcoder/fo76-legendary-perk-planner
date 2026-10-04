@@ -30,7 +30,7 @@
 
 <div class="tile {layout} {locked ? 'locked' : ''} {active ? 'active' : ''}">
   <div class="art">
-    <img src="{baseUrl}cards/{perk.image}.webp" alt={perk.name} loading="lazy" onerror={hideImg} />
+    <img src="{baseUrl}cards/{perk.image}.webp" alt={perk.name} loading="lazy" draggable="false" onerror={hideImg} />
     <div class="fallback">?</div>
     {#if locked && lockLevel}
       <div class="lock"><span class="locklvl">LVL {lockLevel}</span></div>

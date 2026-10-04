@@ -4,6 +4,7 @@
   import CardTile from './CardTile.svelte';
 
   const selectedIds = $derived(new Set(urlState.order));
+  const full = $derived(urlState.order.length >= 6);
 </script>
 
 <div class="panel">
@@ -12,6 +13,7 @@
     {#each LEGENDARY_PERKS as perk (perk.id)}
       <button
         class="pick {selectedIds.has(perk.id) ? 'sel' : ''}"
+        disabled={full && !selectedIds.has(perk.id)}
         onclick={() => urlState.toggleCard(perk.id)}
         title={perk.ranks[0]}
       >
@@ -45,12 +47,18 @@
     background: var(--bg-inset);
     border: 1px solid var(--border-dim);
   }
-  .pick:hover {
+  .pick:hover:not(:disabled) {
     border-color: var(--accent-dim);
     color: var(--text);
   }
   .pick.sel {
     border-color: var(--accent);
     background: rgba(255, 210, 0, 0.08);
+  }
+  .pick:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    color: var(--text-faint);
+    border-color: var(--border-dim);
   }
 </style>
