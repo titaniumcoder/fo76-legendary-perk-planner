@@ -128,7 +128,7 @@ class UrlState {
   toggleCard(id: string) {
     if (this.order.includes(id)) {
       this.removeCard(id);
-    } else {
+    } else if (this.order.length < 6) {
       this.order = [...this.order, id];
       if (!(id in this.ranks)) this.ranks = { ...this.ranks, [id]: 1 };
     }

@@ -10,7 +10,6 @@
   let overIndex = $state<number | null>(null);
 
   const visible = $derived(urlState.order.slice(0, 6));
-  const overflow = $derived(Math.max(0, urlState.order.length - 6));
 
   const rows = $derived(
     visible.map((id, i) => {
@@ -98,10 +97,6 @@
       </div>
     {/each}
   </div>
-
-  {#if overflow > 0}
-    <div class="queue">+{overflow} more in queue — visible in the card list below</div>
-  {/if}
 </div>
 
 <style>
@@ -177,11 +172,5 @@
   }
   .remove:hover {
     color: var(--danger);
-  }
-  .queue {
-    margin-top: 8px;
-    font-size: 12px;
-    color: var(--text-faint);
-    font-style: italic;
   }
 </style>

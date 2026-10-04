@@ -69,4 +69,17 @@ describe('urlState', () => {
     expect(urlState.faction).toBe('ghoul');
     urlState.faction = 'human';
   });
+
+  it('toggleCard is a no-op once 6 cards are selected', () => {
+    urlState.order = ['ammo-factory', 'legendary-luck', 'retribution', 'funky-duds', 'power-sprinter', 'follow-through'];
+    urlState.ranks = {};
+    urlState.toggleCard('what-rads');
+    expect(urlState.order).toHaveLength(6);
+    expect(urlState.order.includes('what-rads')).toBe(false);
+    urlState.toggleCard('ammo-factory');
+    expect(urlState.order).toHaveLength(5);
+    urlState.toggleCard('what-rads');
+    expect(urlState.order).toHaveLength(6);
+    urlState.order = [];
+  });
 });
