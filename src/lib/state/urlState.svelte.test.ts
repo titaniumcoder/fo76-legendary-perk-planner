@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { urlState, UrlState } from './urlState.svelte';
 import { decodeState, encodeState } from '../utils/codec';
 import { computePlan, type PlanEvent } from '../planner/planner';
-import { DEFAULT_ASSUMPTIONS } from '../planner/rules';
+import { DEFAULT_ASSUMPTIONS, MAX_LEVEL } from '../planner/rules';
 
 function fakeStorage() {
   const store = new Map<string, string>();
@@ -350,5 +350,101 @@ describe('urlState', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('levelUp is undoable and redoable', () => {
+    urlState.reset();
+    urlState.level = 49;
+    urlState.coins = 0;
+    urlState.assumptions = { ...DEFAULT_ASSUMPTIONS };
+    urlState.levelUp();
+    expect(urlState.level).toBe(50);
+    expect(urlState.coins).toBe(60);
+    urlState.undo();
+    expect(urlState.level).toBe(49);
+    expect(urlState.coins).toBe(0);
+    urlState.redo();
+    expect(urlState.level).toBe(50);
+    expect(urlState.coins).toBe(60);
+  });
+
+  it('setLevel is undoable, clamped and ignores no-ops', () => {
+    urlState.reset();
+    urlState.level = 100;
+    urlState.setLevel(120);
+    expect(urlState.level).toBe(120);
+    urlState.undo();
+    expect(urlState.level).toBe(100);
+    urlState.redo();
+    expect(urlState.level).toBe(120);
+
+    urlState.undo();
+    urlState.setLevel(120);
+    expect(urlState.level).toBe(120);
+    urlState.setLevel(120);
+    expect(urlState.undoDepth).toBe(1);
+    urlState.setLevel(0);
+    expect(urlState.level).toBe(1);
+    urlState.setLevel(MAX_LEVEL * 2);
+    expect(urlState.level).toBe(MAX_LEVEL);
+  });
+
+  it('setCoins is undoable and clamped at 0', () => {
+    urlState.reset();
+    urlState.coins = 100;
+    urlState.setCoins(250);
+    expect(urlState.coins).toBe(250);
+    urlState.undo();
+    expect(urlState.coins).toBe(100);
+    urlState.setCoins(-5);
+    expect(urlState.coins).toBe(0);
+    urlState.undo();
+    expect(urlState.coins).toBe(100);
+  });
+
+  it('addCoins records an undoable action and skips no-ops', () => {
+    urlState.reset();
+    urlState.coins = 100;
+    urlState.addCoins(25);
+    expect(urlState.coins).toBe(125);
+    urlState.undo();
+    expect(urlState.coins).toBe(100);
+    expect(urlState.canUndo).toBe(false);
+    urlState.addCoins(0);
+    expect(urlState.canUndo).toBe(false);
+  });
+
+  it('buy is undoable and redoable', () => {
+    urlState.reset();
+    urlState.mode = 'regular';
+    urlState.level = 300;
+    urlState.slots = 6;
+    urlState.coins = 150;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 2 };
+    urlState.buy('ammo-factory');
+    expect(urlState.rankOf('ammo-factory')).toBe(3);
+    expect(urlState.coins).toBe(50);
+    urlState.undo();
+    expect(urlState.rankOf('ammo-factory')).toBe(2);
+    expect(urlState.coins).toBe(150);
+    urlState.redo();
+    expect(urlState.rankOf('ammo-factory')).toBe(3);
+    expect(urlState.coins).toBe(50);
+  });
+
+  it('setRank in setup mode is undoable and ignores no-ops', () => {
+    urlState.reset();
+    urlState.mode = 'setup';
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    urlState.setRank('ammo-factory', 1);
+    expect(urlState.canUndo).toBe(false);
+    urlState.setRank('ammo-factory', 3);
+    expect(urlState.rankOf('ammo-factory')).toBe(3);
+    urlState.undo();
+    expect(urlState.rankOf('ammo-factory')).toBe(1);
+    urlState.redo();
+    expect(urlState.rankOf('ammo-factory')).toBe(3);
   });
 });

@@ -258,8 +258,33 @@ export class UrlState {
   levelUp() {
     if (this.level >= MAX_LEVEL) return;
     const next = this.level + 1;
-    this.coins += incomeForLevel(next, this.assumptions, this.level);
-    this.level = next;
+    this.#record(`Level → ${next}`, () => {
+      this.coins += incomeForLevel(next, this.assumptions, this.level);
+      this.level = next;
+    });
+  }
+
+  /** hand-entered level (committed on blur), clamped to 1..MAX_LEVEL */
+  setLevel(level: number) {
+    const n = Math.min(MAX_LEVEL, Math.max(1, Math.floor(level) || 1));
+    if (n === this.level) return;
+    this.#record(`Level → ${n}`, () => {
+      this.level = n;
+    });
+  }
+
+  /** hand-entered coins (committed on blur), clamped at 0 */
+  setCoins(coins: number) {
+    const n = Math.max(0, Math.floor(coins) || 0);
+    if (n === this.coins) return;
+    this.#record(`Coins → ${n}`, () => {
+      this.coins = n;
+    });
+  }
+
+  /** typical scoreboard/challenge reward */
+  addCoins(amount: number) {
+    this.setCoins(this.coins + amount);
   }
 
   /** card is equipped in an available slot at the current level/slots */
@@ -284,9 +309,13 @@ export class UrlState {
   /** REGULAR mode: spend the coins for the next rank-up */
   buy(id: string) {
     if (!this.canBuy(id)) return;
-    const cost = RANK_UP_COSTS[(this.rankOf(id)) - 1];
-    this.coins -= cost;
-    this.setRank(id, this.rankOf(id) + 1);
+    const rank = this.rankOf(id);
+    const cost = RANK_UP_COSTS[rank - 1];
+    const name = PERK_BY_ID.get(id)?.name ?? id;
+    this.#record(`${name} → ${rank + 1}★`, () => {
+      this.coins -= cost;
+      this.#setRankRaw(id, rank + 1);
+    });
   }
 
   setMode(mode: Mode) {
@@ -307,7 +336,15 @@ export class UrlState {
     this.order = this.order.filter((c) => c !== id);
   }
 
+  /** SETUP mode: set a rank freely */
   setRank(id: string, rank: number) {
+    const r = clampRank(rank);
+    if ((this.ranks[id] ?? 1) === r) return;
+    const name = PERK_BY_ID.get(id)?.name ?? id;
+    this.#record(`${name} → ${r}★`, () => this.#setRankRaw(id, r));
+  }
+
+  #setRankRaw(id: string, rank: number) {
     this.ranks = { ...this.ranks, [id]: clampRank(rank) };
   }
 

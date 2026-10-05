@@ -5,6 +5,18 @@
   const autoSlots = $derived(slotsUnlockedAtLevel(urlState.level));
   const effectiveSlots = $derived(Math.max(urlState.slots, autoSlots));
 
+  // drafts commit on blur (recording the undoable action); synced back on any
+  // external change (undo/redo, ✓ fast-forward, pasted links)
+  let levelDraft = $state<number | null>(urlState.level);
+  let coinsDraft = $state<number | null>(urlState.coins);
+
+  $effect(() => {
+    levelDraft = urlState.level;
+  });
+  $effect(() => {
+    coinsDraft = urlState.coins;
+  });
+
   // a character can never have fewer slots than its level grants: bump the
   // stored selection when the entered level crosses a milestone
   $effect(() => {
@@ -18,7 +30,14 @@
   <div class="row">
     <label class="label" for="level">Current level</label>
     <div class="lvlrow">
-      <input id="level" type="number" min="1" max={MAX_LEVEL} bind:value={urlState.level} />
+      <input
+        id="level"
+        type="number"
+        min="1"
+        max={MAX_LEVEL}
+        bind:value={levelDraft}
+        onblur={() => urlState.setLevel(Number(levelDraft))}
+      />
       <button
         class="lvlup"
         onclick={() => urlState.levelUp()}
@@ -51,10 +70,16 @@
   <div class="row">
     <label class="label" for="coins">Perk coins on hand</label>
     <div class="lvlrow">
-      <input id="coins" type="number" min="0" bind:value={urlState.coins} />
+      <input
+        id="coins"
+        type="number"
+        min="0"
+        bind:value={coinsDraft}
+        onblur={() => urlState.setCoins(Number(coinsDraft))}
+      />
       <button
         class="lvlup"
-        onclick={() => (urlState.coins = urlState.coins + 25)}
+        onclick={() => urlState.addCoins(25)}
         title="Add 25 perk coins (typical scoreboard/challenge reward)"
       >+25</button>
     </div>
