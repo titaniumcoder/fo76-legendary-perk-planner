@@ -28,9 +28,6 @@ export const COINS_PER_PACK = CARDS_PER_PACK * COINS_PER_CARD_RANK;
 /** One-time "Become Legendary" challenge reward at level 50. */
 export const LEVEL_50_BONUS = 50;
 
-/** Perk coin stockpile cap. */
-export const COIN_CAP = 5000;
-
 /** The game's hard level cap. */
 export const MAX_LEVEL = 32767;
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { PlanResult, PlanEvent } from '../lib/planner/planner';
+  import type { PlanResult } from '../lib/planner/planner';
+  import { urlState } from '../lib/state/urlState.svelte';
   import { fmt } from '../lib/utils/format';
 
   let { plan }: { plan: PlanResult } = $props();
@@ -14,7 +15,11 @@
 </script>
 
 <div class="panel">
-  <div class="panel-title">Plan timeline <span class="sum">{summary} · need {fmt(plan.totalCoinsNeeded)}</span></div>
+  <div class="panel-title">
+    Plan timeline
+    <span class="sum">{summary} · need {fmt(plan.totalCoinsNeeded)}</span>
+    <span class="didhint" title="Click ✓ on a step once you actually reached that level in game — the character state catches up (level, rank-ups, remaining coins)">✓ = I'm here</span>
+  </div>
   {#if plan.events.length === 0}
     <div class="empty">
       {#if plan.stalled}
@@ -27,8 +32,14 @@
     </div>
   {:else}
     <div class="timeline">
-      {#each plan.events as e (e.level + e.cardId + e.toRank)}
+      {#each plan.events as e, i (e.level + e.cardId + e.toRank)}
         <div class="ev" title="{e.cardName} → {e.toRank}★ at level {fmt(e.level)} (−{fmt(e.cost)} coins)">
+          <button
+            class="did"
+            aria-label="Assume it happened: {e.cardName} → {e.toRank}★ at level {fmt(e.level)}"
+            title="Assume this happened — jump to level {fmt(e.level)}, apply all rank-ups up to here and set coins to whatever remains after the level-ups"
+            onclick={() => urlState.applyPlanUpTo(plan.events, i)}
+          >✓</button>
           <span class="what">{e.cardName} <span class="stars">{'★'.repeat(e.toRank)}</span></span>
           <span class="lvl">{fmt(e.level)}</span>
         </div>
@@ -45,6 +56,31 @@
     font-size: 11px;
     margin-left: 6px;
     text-transform: none;
+  }
+  .didhint {
+    margin-left: auto;
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.05em;
+    text-transform: none;
+    cursor: help;
+  }
+  .did {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: rgba(10, 12, 13, 0.6);
+    color: var(--text-dim);
+  }
+  .did:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: rgba(10, 12, 13, 0.85);
   }
   .empty {
     color: var(--text-faint);

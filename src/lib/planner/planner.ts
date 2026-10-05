@@ -1,5 +1,4 @@
 import {
-  COIN_CAP,
   MAX_LEVEL,
   MAX_RANK,
   RANK_UP_COSTS,
@@ -62,8 +61,6 @@ export interface PlanResult {
   totalCoinsNeeded: number;
   /** sum of simulated coin income */
   coinsEarnedTotal: number;
-  /** coins lost to the 5000 cap */
-  coinsWastedToCap: number;
   allDone: boolean;
   /** effective slots available at the current level */
   availableSlotsNow: number;
@@ -93,7 +90,7 @@ function sanitize(input: PlannerInput): Required<PlannerInput> {
   return {
     level: clamp(Math.floor(input.level) || 1, 1, MAX_LEVEL),
     slotsUnlocked: clamp(Math.floor(input.slotsUnlocked) || 0, 0, 6),
-    coinsOwned: clamp(Math.floor(input.coinsOwned) || 0, 0, COIN_CAP),
+    coinsOwned: Math.max(0, Math.floor(input.coinsOwned) || 0),
     cards,
     rememberedRanks: remembered,
     assumptions: {
@@ -177,7 +174,6 @@ export function computePlan(raw: PlannerInput): PlanResult {
   const events: PlanEvent[] = [];
   let coins = input.coinsOwned;
   let coinsEarnedTotal = 0;
-  let coinsWastedToCap = 0;
   let totalCoinsNeeded = 0;
   const firstEquipped = new Map<string, number>();
 
@@ -216,9 +212,7 @@ export function computePlan(raw: PlannerInput): PlanResult {
       } else {
         stagnant = 0;
         coinsEarnedTotal += income;
-        const overflow = coins + income - COIN_CAP;
-        if (overflow > 0) coinsWastedToCap += overflow;
-        coins = Math.min(COIN_CAP, coins + income);
+        coins += income;
       }
 
       doLevel(n);
@@ -259,7 +253,6 @@ export function computePlan(raw: PlannerInput): PlanResult {
     finishedAtLevel,
     totalCoinsNeeded,
     coinsEarnedTotal,
-    coinsWastedToCap,
     allDone: finishedAtLevel !== null,
     availableSlotsNow,
     nextSlotUnlock,

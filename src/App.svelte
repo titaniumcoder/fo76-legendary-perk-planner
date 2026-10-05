@@ -47,6 +47,20 @@
       onclick={() => urlState.setMode(urlState.mode === 'regular' ? 'setup' : 'regular')}
     >Mode: {urlState.mode === 'regular' ? 'Regular' : 'Setup'}</button>
     <button onclick={copyLink}>{copied ? 'Copied!' : 'Copy plan link'}</button>
+    <button
+      disabled={!urlState.canUndo}
+      title={urlState.nextUndoLabel()
+        ? `Undo: ${urlState.nextUndoLabel()} (session-only history)`
+        : 'Nothing to undo'}
+      onclick={() => urlState.undo()}
+    >Undo</button>
+    <button
+      disabled={!urlState.canRedo}
+      title={urlState.nextRedoLabel()
+        ? `Redo: ${urlState.nextRedoLabel()} (session-only history)`
+        : 'Nothing to redo'}
+      onclick={() => urlState.redo()}
+    >Redo</button>
     <button onclick={() => urlState.reset()}>Reset</button>
   </div>
 </header>

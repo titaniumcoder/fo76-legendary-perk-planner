@@ -1,6 +1,6 @@
 <script lang="ts">
   import { urlState } from '../lib/state/urlState.svelte';
-  import { COIN_CAP, MAX_LEVEL, SLOT_MILESTONES, slotsUnlockedAtLevel } from '../lib/planner/rules';
+  import { MAX_LEVEL, SLOT_MILESTONES, slotsUnlockedAtLevel } from '../lib/planner/rules';
 
   const autoSlots = $derived(slotsUnlockedAtLevel(urlState.level));
   const effectiveSlots = $derived(Math.max(urlState.slots, autoSlots));
@@ -23,7 +23,7 @@
         class="lvlup"
         onclick={() => urlState.levelUp()}
         disabled={urlState.level >= MAX_LEVEL}
-        title="Level up: gain the coins for the next level and auto-buy the planned upgrades"
+        title="Level up: gain the coins for the next level — buying ranks stays manual. Use ✓ in the plan timeline to fast-forward to a plan point."
       >+1</button>
     </div>
   </div>
@@ -51,11 +51,10 @@
   <div class="row">
     <label class="label" for="coins">Perk coins on hand</label>
     <div class="lvlrow">
-      <input id="coins" type="number" min="0" max="5000" bind:value={urlState.coins} />
+      <input id="coins" type="number" min="0" bind:value={urlState.coins} />
       <button
         class="lvlup"
-        onclick={() => (urlState.coins = Math.min(COIN_CAP, urlState.coins + 25))}
-        disabled={urlState.coins >= COIN_CAP}
+        onclick={() => (urlState.coins = urlState.coins + 25)}
         title="Add 25 perk coins (typical scoreboard/challenge reward)"
       >+25</button>
     </div>

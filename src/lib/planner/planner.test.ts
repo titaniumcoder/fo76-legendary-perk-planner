@@ -233,9 +233,10 @@ describe('plan results', () => {
     expect(plan.events).toHaveLength(0);
   });
 
-  it('tracks coin cap waste', () => {
-    const plan = computePlan({ ...base, level: 34, slotsUnlocked: 0, coinsOwned: 5000, cards: cards(['ammo-factory']) });
-    expect(plan.coinsWastedToCap).toBeGreaterThan(0);
+  it('no cap: coins accumulate past 5000 without loss', () => {
+    const plan = computePlan({ ...base, level: 34, slotsUnlocked: 0, coinsOwned: 4950, cards: cards(['ammo-factory']) });
+    const first = plan.events.find((e) => e.cardId === 'ammo-factory')!;
+    expect(first.coinsAfter).toBeGreaterThan(5000);
     expect(plan.finishedAtLevel).toBeGreaterThan(34);
   });
 

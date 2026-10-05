@@ -1,5 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { urlState } from './urlState.svelte';
+import { describe, expect, it, vi } from 'vitest';
+import { urlState, UrlState } from './urlState.svelte';
+import { decodeState, encodeState } from '../utils/codec';
+import { computePlan, type PlanEvent } from '../planner/planner';
+import { DEFAULT_ASSUMPTIONS } from '../planner/rules';
+
+function fakeStorage() {
+  const store = new Map<string, string>();
+  return {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+}
 
 describe('urlState', () => {
   it('defaults: level 1, slots 6, empty plan', () => {
@@ -130,5 +143,212 @@ describe('urlState', () => {
     urlState.toggleCard('what-rads');
     expect(urlState.order).toHaveLength(6);
     urlState.order = [];
+  });
+
+  it('syncToUrl replaces the current history entry — it never pushes', () => {
+    vi.useFakeTimers();
+    const push = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: push, replaceState: replace });
+    try {
+      urlState.level = 123;
+      urlState.syncToUrl();
+      vi.advanceTimersByTime(250);
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(push).not.toHaveBeenCalled();
+      expect(String(replace.mock.calls[0][2])).toMatch(/^#s=/);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reset pushes a fresh history entry so Back restores the pre-reset plan', () => {
+    const push = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: push, replaceState: replace });
+    try {
+      urlState.level = 100;
+      urlState.order = ['ammo-factory'];
+      urlState.ranks = { 'ammo-factory': 2 };
+      urlState.coins = 100;
+      urlState.reset();
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(replace).not.toHaveBeenCalled();
+      const state = decodeState(String(push.mock.calls[0][2]));
+      expect(state?.order).toEqual([]);
+      expect(state?.coins).toBe(0);
+      expect(state?.level).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  const eventsAt = (level: number, cardId = 'ammo-factory', cost = 50): PlanEvent[] => [
+    { cardId, cardName: cardId, fromRank: 1, toRank: 2, cost, coinsAfter: 0, level },
+  ];
+
+  it('applyPlanUpTo jumps the level, applies rank-ups and keeps the remainder', () => {
+    urlState.reset();
+    urlState.level = 49;
+    urlState.slots = 6;
+    urlState.coins = 0;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    const plan = computePlan({
+      level: 49,
+      slotsUnlocked: 6,
+      coinsOwned: 0,
+      cards: [{ id: 'ammo-factory', rank: 1 }],
+      assumptions: { ...DEFAULT_ASSUMPTIONS },
+    });
+    expect(plan.events.length).toBeGreaterThan(0);
+    urlState.applyPlanUpTo(plan.events, 0);
+    expect(urlState.level).toBe(plan.events[0].level);
+    expect(urlState.level).toBe(50);
+    expect(urlState.rankOf('ammo-factory')).toBe(2);
+    expect(urlState.coins).toBe(plan.events[0].coinsAfter);
+  });
+
+  it('applyPlanUpTo keeps every coin — spends at the scheduled level', () => {
+    urlState.reset();
+    urlState.level = 100;
+    urlState.slots = 6;
+    urlState.coins = 4990;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    urlState.applyPlanUpTo(eventsAt(103, 'ammo-factory', 150), 0);
+    expect(urlState.level).toBe(103);
+    expect(urlState.coins).toBe(4990 + 6 - 150);
+  });
+
+  it('applyPlanUpTo accrues income past the old 5000 cap without loss', () => {
+    urlState.reset();
+    urlState.level = 100;
+    urlState.slots = 6;
+    urlState.coins = 4990;
+    urlState.order = [];
+    urlState.ranks = {};
+    urlState.applyPlanUpTo(eventsAt(115, 'legendary-luck', 0), 0);
+    expect(urlState.level).toBe(115);
+    expect(urlState.coins).toBe(4990 + 30 + 24);
+    expect(urlState.coins).toBeGreaterThan(5000);
+  });
+
+  it('applyPlanUpTo bumps slots when the level crosses a milestone', () => {
+    urlState.reset();
+    urlState.level = 74;
+    urlState.slots = 1;
+    urlState.coins = 50;
+    urlState.order = ['legendary-luck'];
+    urlState.ranks = {};
+    urlState.applyPlanUpTo(eventsAt(75, 'legendary-luck'), 0);
+    expect(urlState.level).toBe(75);
+    expect(urlState.slots).toBe(2);
+    expect(urlState.coins).toBe(10);
+  });
+
+  it('applyPlanUpTo is undoable and redoable', () => {
+    urlState.reset();
+    urlState.level = 49;
+    urlState.slots = 6;
+    urlState.coins = 0;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    const plan = computePlan({
+      level: 49,
+      slotsUnlocked: 6,
+      coinsOwned: 0,
+      cards: [{ id: 'ammo-factory', rank: 1 }],
+      assumptions: { ...DEFAULT_ASSUMPTIONS },
+    });
+    expect(urlState.canUndo).toBe(false);
+    urlState.applyPlanUpTo(plan.events, 0);
+    expect(urlState.canUndo).toBe(true);
+    expect(urlState.canRedo).toBe(false);
+    expect(urlState.nextUndoLabel()).toContain('LVL 50');
+
+    urlState.undo();
+    expect(urlState.level).toBe(49);
+    expect(urlState.coins).toBe(0);
+    expect(urlState.rankOf('ammo-factory')).toBe(1);
+    expect(urlState.canRedo).toBe(true);
+
+    urlState.redo();
+    expect(urlState.level).toBe(50);
+    expect(urlState.coins).toBe(plan.events[0].coinsAfter);
+    expect(urlState.rankOf('ammo-factory')).toBe(2);
+  });
+
+  it('a new action invalidates redo', () => {
+    urlState.reset();
+    urlState.level = 49;
+    urlState.slots = 6;
+    urlState.coins = 100;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    urlState.applyPlanUpTo(eventsAt(49), 0);
+    urlState.undo();
+    expect(urlState.canRedo).toBe(true);
+    urlState.applyPlanUpTo(eventsAt(49), 0);
+    expect(urlState.canRedo).toBe(false);
+  });
+
+  it('the undo log caps at 50 entries', () => {
+    urlState.reset();
+    const events = eventsAt(1, 'legendary-luck', 0);
+    for (let i = 0; i < 51; i++) urlState.applyPlanUpTo(events, 0);
+    expect(urlState.undoDepth).toBe(50);
+    expect(urlState.canUndo).toBe(true);
+  });
+
+  it('reset clears the undo/redo log', () => {
+    urlState.reset();
+    urlState.applyPlanUpTo(eventsAt(1, 'legendary-luck', 0), 0);
+    expect(urlState.canUndo).toBe(true);
+    urlState.reset();
+    expect(urlState.canUndo).toBe(false);
+    expect(urlState.canRedo).toBe(false);
+  });
+
+  it('the action log never changes the URL encoding', () => {
+    urlState.reset();
+    urlState.level = 49;
+    urlState.slots = 6;
+    urlState.coins = 0;
+    urlState.order = ['ammo-factory'];
+    urlState.ranks = { 'ammo-factory': 1 };
+    const before = encodeState(urlState.snapshot());
+    urlState.applyPlanUpTo(eventsAt(50), 0);
+    urlState.undo();
+    expect(encodeState(urlState.snapshot())).toBe(before);
+  });
+
+  it('the undo/redo log survives a reload via sessionStorage', () => {
+    vi.stubGlobal('sessionStorage', fakeStorage());
+    try {
+      urlState.reset();
+      urlState.level = 49;
+      urlState.slots = 6;
+      urlState.coins = 0;
+      urlState.order = ['ammo-factory'];
+      urlState.ranks = { 'ammo-factory': 1 };
+      urlState.applyPlanUpTo(eventsAt(50), 0);
+      expect(urlState.undoDepth).toBe(1);
+
+      const fresh = new UrlState();
+      expect(fresh.undoDepth).toBe(1);
+      expect(fresh.redoDepth).toBe(0);
+      fresh.undo();
+      expect(fresh.level).toBe(49);
+      expect(fresh.coins).toBe(0);
+      expect(fresh.rankOf('ammo-factory')).toBe(1);
+      expect(fresh.canRedo).toBe(true);
+      fresh.redo();
+      expect(fresh.level).toBe(50);
+      expect(fresh.rankOf('ammo-factory')).toBe(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
