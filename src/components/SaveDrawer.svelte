@@ -89,6 +89,12 @@
   }
   .toggle {
     background: transparent;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
   }
   .panel {
     position: absolute;

@@ -41,6 +41,11 @@
     <div class="sub">FALLOUT 76 · LEVEL → PERK COIN → 4★</div>
   </div>
   <div class="actions">
+    <span
+      class="chip"
+      class:link={urlState.origin === 'link'}
+      title={urlState.origin === 'link' ? 'Viewing a shared link — the URL cleans up on your first edit' : 'Your state is saved in this browser (localStorage)'}
+    >{urlState.origin === 'link' ? 'viewing link' : 'saved locally'}</span>
     <button
       class="modetoggle"
       class:live={urlState.mode === 'regular'}
@@ -48,11 +53,6 @@
       title={urlState.mode === 'regular' ? 'Regular mode: buying ranks costs real perk coins. Click to switch back to setup.' : 'Setup mode: set ranks freely. Click to switch to regular mode (buying costs coins).'}
       onclick={() => urlState.setMode(urlState.mode === 'regular' ? 'setup' : 'regular')}
     >Mode: {urlState.mode === 'regular' ? 'Regular' : 'Setup'}</button>
-    <span
-      class="chip"
-      class:link={urlState.origin === 'link'}
-      title={urlState.origin === 'link' ? 'Viewing a shared link — the URL cleans up on your first edit' : 'Your state is saved in this browser (localStorage)'}
-    >{urlState.origin === 'link' ? 'viewing link' : 'saved locally'}</span>
     <SaveDrawer />
     <button onclick={copyLink}>{copied ? 'Copied!' : 'Share link'}</button>
     <button
@@ -117,6 +117,16 @@
     display: flex;
     gap: 8px;
     align-items: center;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .actions > button {
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
   }
   .modetoggle.live {
     background: linear-gradient(to bottom, #3a3320, #2a2517);
@@ -130,8 +140,13 @@
     color: var(--text-faint);
     border: 1px solid var(--border-dim);
     border-radius: 999px;
-    padding: 4px 10px;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
     white-space: nowrap;
+    margin-right: 10px;
   }
   .chip.link {
     color: var(--accent);
