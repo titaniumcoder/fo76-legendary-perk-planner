@@ -92,6 +92,8 @@
       </div>
       {#if active}
         <p class="hint">“{active}” updates as you play — save under a new name to keep a copy.</p>
+      {:else if saves.length}
+        <p class="hint">Click a save to keep it in sync as you play.</p>
       {/if}
       {#if saves.length === 0}
         <p class="empty">No saved plans yet.</p>

@@ -103,6 +103,17 @@ export class UrlState {
     if (typeof localStorage !== 'undefined') saveActiveName(localStorage, null);
   }
 
+  /** migration: state restored from localStorage but no link persisted (data
+   *  from before the live-link feature) — link the most recent named save */
+  #linkMostRecent() {
+    if (typeof localStorage === 'undefined' || this.#activeSave) return;
+    const saves = loadSaves(localStorage);
+    if (!saves.length) return;
+    const latest = saves.reduce((a, b) => (b.savedAt > a.savedAt ? b : a));
+    this.#activeSave = latest.name;
+    saveActiveName(localStorage, latest.name);
+  }
+
   constructor() {
     const link = typeof location !== 'undefined' ? decodeState(location.hash) : null;
     const local = typeof localStorage !== 'undefined' ? loadCurrent(localStorage) : null;
@@ -125,6 +136,9 @@ export class UrlState {
       this.#fromLink = res.action === 'load-url';
       // link-loaded states are not tied to a named save
       if (res.action === 'load-url') this.#unlinkActive();
+      // restored from localStorage: migrate pre-live-link data by linking
+      // the most recent save
+      if (res.action === 'load-local') this.#linkMostRecent();
     }
     this.#adopt(s);
     this.#lastPersisted = encodeState(s);
@@ -462,6 +476,7 @@ export class UrlState {
       this.#lastPersisted = encodeState(c.local);
       this.#clearHash();
       // keep the persisted active-save link: the local state is that save's content
+      this.#linkMostRecent();
     } else {
       // the link state is already adopted; overwrite the local slot with it.
       // the hash stays until the first edit (this overwrite is not an edit).

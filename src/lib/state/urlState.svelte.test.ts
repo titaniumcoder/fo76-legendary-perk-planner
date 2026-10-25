@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { urlState, UrlState } from './urlState.svelte';
 import { decodeState, encodeState, type AppState } from '../utils/codec';
-import { loadActiveName, loadCurrent, saveCurrent, saveActiveName, CURRENT_KEY } from './storage';
+import { loadActiveName, loadCurrent, loadSaves, saveCurrent, saveActiveName, CURRENT_KEY } from './storage';
 import { computePlan, type PlanEvent } from '../planner/planner';
 import { DEFAULT_ASSUMPTIONS, MAX_LEVEL } from '../planner/rules';
 
@@ -431,6 +431,34 @@ describe('urlState', () => {
       expect(s.activeSave).toBeNull(); // link state is not the named save
       expect(loadActiveName(ls)).toBeNull();
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('migrates pre-live-link data: load-local startup links the most recent save', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: '' });
+    const ls = fakeStorage();
+    const wire = (lvl: number) => encodeState({ ...localState, level: lvl });
+    saveCurrent(ls as unknown as Storage, { ...localState, level: 131 });
+    const old = [{ name: 'main', savedAt: 100, state: wire(126) }, { name: 'alt', savedAt: 200, state: wire(126) }];
+    ls.setItem('fo76-perk-saves', JSON.stringify(old));
+    ls.removeItem('fo76-perk-active');
+    vi.stubGlobal('localStorage', ls);
+    try {
+      const s = new UrlState();
+      expect(s.activeSave).toBe('alt'); // most recent save wins
+      vi.useFakeTimers();
+      s.level = 132;
+      s.persist();
+      vi.advanceTimersByTime(250);
+      vi.useRealTimers();
+      const saves = loadSaves(ls as unknown as Storage);
+      const alt = saves.find((sv) => sv.name === 'alt');
+      const main = saves.find((sv) => sv.name === 'main');
+      expect(alt?.state.level).toBe(132); // live save follows
+      expect(main?.state.level).toBe(126); // other saves untouched
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
