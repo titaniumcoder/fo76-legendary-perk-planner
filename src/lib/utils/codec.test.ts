@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeState, encodeState, type AppState } from './codec';
+import { decodeHash, decodeState, encodeState, type AppState } from './codec';
 import { DEFAULT_ASSUMPTIONS } from '../planner/rules';
 
 const state: AppState = {
@@ -59,6 +59,43 @@ describe('codec v2', () => {
   it('returns null for unknown versions', () => {
     const bytes = new TextEncoder().encode(JSON.stringify([99, [1, 0, 0, [], {}, [2, 8, 50], 0]]));
     expect(decodeState(b64url(bytes))).toBeNull();
+  });
+});
+
+describe('decodeHash', () => {
+  const st = encodeState({
+    level: 50,
+    slots: 2,
+    coins: 5,
+    order: ['ammo-factory'],
+    ranks: { 'ammo-factory': 1 },
+    assumptions: { ...DEFAULT_ASSUMPTIONS },
+    faction: 'human',
+    mode: 'setup',
+  });
+
+  it('parses a plain wire (back-compat)', () => {
+    expect(decodeHash(`#s=${st}`)).toEqual({ state: decodeState(st), name: null });
+    expect(decodeHash(st).name).toBeNull();
+  });
+
+  it('parses the save name and URL-decodes it', () => {
+    expect(decodeHash(`#s=${st}&n=main`).name).toBe('main');
+    expect(decodeHash(`#s=${st}&n=${encodeURIComponent('my plan 4★')}`).name).toBe('my plan 4★');
+    expect(decodeHash(`#s=${st}&n=main`).state).not.toBeNull();
+  });
+
+  it('ignores malformed or overlong names', () => {
+    expect(decodeHash(`#s=${st}&n=%zz`).name).toBeNull();
+    expect(decodeHash(`#s=${st}&n=${'x'.repeat(61)}`).name).toBeNull();
+    expect(decodeHash(`#s=${st}&other=1`).name).toBeNull();
+  });
+
+  it('round-trips through currentUrl-style links', () => {
+    const url = `https://x.test/p#s=${st}&n=${encodeURIComponent('alt save')}`;
+    const parsed = decodeHash(url.slice(url.indexOf('#')));
+    expect(parsed.name).toBe('alt save');
+    expect(parsed.state).toEqual(decodeState(st));
   });
 });
 

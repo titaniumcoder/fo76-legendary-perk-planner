@@ -85,6 +85,31 @@ export function decodeState(hash: string): AppState | null {
   }
 }
 
+export interface DecodedHash {
+  state: AppState | null;
+  /** save name carried by the link (`&n=`), if any */
+  name: string | null;
+}
+
+/** parse a full share hash: `#s=<wire>` plus optional `&n=<name>` */
+export function decodeHash(hash: string): DecodedHash {
+  const raw = hash.startsWith('#s=') ? hash.slice(3) : hash.startsWith('#') ? hash.slice(1) : hash;
+  if (!raw) return { state: null, name: null };
+  const [wire, ...params] = raw.split('&');
+  let name: string | null = null;
+  for (const p of params) {
+    if (p.startsWith('n=')) {
+      try {
+        const v = decodeURIComponent(p.slice(2));
+        if (v && v.length <= 60) name = v;
+      } catch {
+        // malformed encoding — treat as unnamed
+      }
+    }
+  }
+  return { state: decodeState(wire), name };
+}
+
 function migrateV2(wire: unknown): AppState | null {
   if (!Array.isArray(wire) || wire.length !== 7) return null;
   const [level, slots, coins, order, ranks, assump, faction] = wire as Wire2;

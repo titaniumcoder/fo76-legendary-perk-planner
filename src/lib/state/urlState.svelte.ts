@@ -1,7 +1,7 @@
 import { DEFAULT_ASSUMPTIONS, MAX_LEVEL, MAX_RANK, RANK_UP_COSTS, incomeForLevel, slotsUnlockedAtLevel, type PlannerAssumptions } from '../planner/rules';
 import { equippedCardIds, type PlanEvent, type PlannerCard } from '../planner/planner';
 import { PERK_BY_ID } from '../data/legendaryPerks';
-import { clampRank, decodeState, encodeState, type AppState, type Faction, type Mode } from '../utils/codec';
+import { clampRank, decodeHash, decodeState, encodeState, type AppState, type Faction, type Mode } from '../utils/codec';
 import {
   loadActiveName,
   loadCurrent,
@@ -64,6 +64,9 @@ function defaultState(): AppState {
   };
 }
 
+/** encoded defaults — states differing from this have content worth naming */
+export const EMPTY_WIRE = encodeState(defaultState());
+
 export class UrlState {
   level = $state(1);
   slots = $state(6);
@@ -87,14 +90,21 @@ export class UrlState {
   #timer: ReturnType<typeof setTimeout> | undefined;
   /** encoded snapshot as last written to localStorage — skips no-op persists */
   #lastPersisted = '';
-  /** true while the active state came from a link; the hash is stripped on the first edit */
-  #fromLink = false;
+  /** true while the URL carries a link state; the hash is stripped on the first edit */
+  #fromLink = $state(false);
   /** name of the linked (live) save: auto-updated on every persisted change */
   #activeSave = $state<string | null>(null);
+  /** save name carried by the link that is waiting in the conflict modal */
+  #pendingLinkName: string | null = null;
   #adopting = false;
 
   get activeSave(): string | null {
     return this.#activeSave;
+  }
+
+  /** true while the URL still carries the loaded link state */
+  get viewingLink(): boolean {
+    return this.#fromLink;
   }
 
   /** break the live link (state no longer matches the named save) */
@@ -114,12 +124,27 @@ export class UrlState {
     saveActiveName(localStorage, latest.name);
   }
 
+  /** adopt a link that carries a save name: save it under that name right
+   *  away (named save + autosave slot) and link it as the live save */
+  #adoptNamedLink(name: string) {
+    if (typeof localStorage === 'undefined') return;
+    const s = this.snapshot();
+    saveSaves(localStorage, upsertSave(loadSaves(localStorage), name, s).saves);
+    saveCurrent(localStorage, s);
+    this.#activeSave = name;
+    saveActiveName(localStorage, name);
+    this.#lastPersisted = encodeState(s);
+  }
+
   constructor() {
-    const link = typeof location !== 'undefined' ? decodeState(location.hash) : null;
+    const parsed = typeof location !== 'undefined' ? decodeHash(location.hash) : { state: null, name: null };
+    const link = parsed.state ? normalize(parsed.state) : null;
+    const linkName = parsed.name;
     const local = typeof localStorage !== 'undefined' ? loadCurrent(localStorage) : null;
-    const res = resolveStartup({ link: link ? normalize(link) : null, local });
+    const res = resolveStartup({ link, local });
     this.#activeSave = typeof localStorage !== 'undefined' ? loadActiveName(localStorage) : null;
     let s: AppState;
+    let adoptName: string | null = null;
     if (res.action === 'default') {
       s = defaultState();
       // fresh start: nothing links to a named save yet
@@ -129,18 +154,23 @@ export class UrlState {
       s = res.link;
       this.origin = 'link';
       this.#fromLink = true;
+      this.#pendingLinkName = linkName;
       this.pendingConflict = { link: res.link, local: res.local };
     } else {
       s = res.state;
       this.origin = res.action === 'load-url' ? 'link' : 'local';
       this.#fromLink = res.action === 'load-url';
-      // link-loaded states are not tied to a named save
-      if (res.action === 'load-url') this.#unlinkActive();
+      if (res.action === 'load-url') {
+        this.#unlinkActive();
+        // a named link is saved under its name right away (after adoption)
+        if (linkName) adoptName = linkName;
+      }
       // restored from localStorage: migrate pre-live-link data by linking
       // the most recent save
       if (res.action === 'load-local') this.#linkMostRecent();
     }
     this.#adopt(s);
+    if (adoptName) this.#adoptNamedLink(adoptName);
     this.#lastPersisted = encodeState(s);
     this.#loadHistory();
 
@@ -239,15 +269,17 @@ export class UrlState {
   }
 
   /** adopt state coming from the URL (back button, pasted link in same tab);
-   *  breaks the live link — the pasted state is not the named save */
+   *  a named link is saved under its name right away, an unnamed one breaks
+   *  the live link */
   #adoptFromUrl() {
-    const s = typeof location !== 'undefined' ? decodeState(location.hash) : null;
-    if (!s) return;
-    this.#adopt(normalize(s));
+    const parsed = typeof location !== 'undefined' ? decodeHash(location.hash) : { state: null, name: null };
+    if (!parsed.state) return;
+    this.#adopt(normalize(parsed.state));
     this.#fromLink = true;
     this.origin = 'link';
+    if (parsed.name) this.#adoptNamedLink(parsed.name);
+    else this.#unlinkActive();
     this.#lastPersisted = encodeState(this.snapshot());
-    this.#unlinkActive();
   }
 
   #clearHash() {
@@ -478,14 +510,18 @@ export class UrlState {
       // keep the persisted active-save link: the local state is that save's content
       this.#linkMostRecent();
     } else {
-      // the link state is already adopted; overwrite the local slot with it.
-      // the hash stays until the first edit (this overwrite is not an edit).
       const s = this.snapshot();
       this.origin = 'local';
-      this.#unlinkActive();
-      if (typeof localStorage !== 'undefined') saveCurrent(localStorage, s);
-      this.#lastPersisted = encodeState(s);
+      if (this.#pendingLinkName) {
+        // a named link is saved under its name right away
+        this.#adoptNamedLink(this.#pendingLinkName);
+      } else {
+        this.#unlinkActive();
+        if (typeof localStorage !== 'undefined') saveCurrent(localStorage, s);
+        this.#lastPersisted = encodeState(s);
+      }
     }
+    this.#pendingLinkName = null;
   }
 
   // --- named saves ----------------------------------------------------------
@@ -535,7 +571,8 @@ export class UrlState {
   }
 
   currentUrl(): string {
-    return `${location.origin}${location.pathname}#s=${encodeState(this.snapshot())}`;
+    const name = this.#activeSave ? `&n=${encodeURIComponent(this.#activeSave)}` : '';
+    return `${location.origin}${location.pathname}#s=${encodeState(this.snapshot())}${name}`;
   }
 }
 

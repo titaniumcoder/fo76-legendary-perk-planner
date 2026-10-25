@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { urlState, UrlState } from './urlState.svelte';
-import { decodeState, encodeState, type AppState } from '../utils/codec';
+import { decodeHash, encodeState, type AppState } from '../utils/codec';
 import { loadActiveName, loadCurrent, loadSaves, saveCurrent, saveActiveName, CURRENT_KEY } from './storage';
 import { computePlan, type PlanEvent } from '../planner/planner';
 import { DEFAULT_ASSUMPTIONS, MAX_LEVEL } from '../planner/rules';
@@ -257,6 +257,79 @@ describe('urlState', () => {
       expect(fromLink.origin).toBe('link');
       expect(fromLink.level).toBe(linkState.level);
       expect(replace).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a NAMED link is saved under its name right away and linked', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}&n=main` });
+    const ls = fakeStorage();
+    vi.stubGlobal('localStorage', ls);
+    try {
+      const s = new UrlState();
+      expect(s.activeSave).toBe('main');
+      expect(s.viewingLink).toBe(true);
+      // saved immediately: named entry + autosave slot, even before any edit
+      const saves = loadSaves(ls as unknown as Storage);
+      expect(saves).toHaveLength(1);
+      expect(saves[0].name).toBe('main');
+      expect(saves[0].state.level).toBe(linkState.level);
+      expect(loadCurrent(ls as unknown as Storage)?.level).toBe(linkState.level);
+      expect(loadActiveName(ls)).toBe('main');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('an UNNAMED link leaves the state unsaved (warning case)', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    const ls = fakeStorage();
+    vi.stubGlobal('localStorage', ls);
+    try {
+      const s = new UrlState();
+      expect(s.activeSave).toBeNull();
+      expect(loadCurrent(ls as unknown as Storage)).toBeNull(); // nothing persisted yet
+      expect(ls.getItem('fo76-perk-saves')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('currentUrl carries the linked save name', () => {
+    vi.stubGlobal('location', { origin: 'https://x.test', pathname: '/p', search: '', hash: '' });
+    vi.stubGlobal('localStorage', fakeStorage());
+    try {
+      urlState.level = 10;
+      urlState.order = [];
+      urlState.ranks = {};
+      urlState.saveAs('my plan');
+      const url = urlState.currentUrl();
+      expect(url).toContain('&n=my%20plan');
+      const parsed = decodeHash(url.slice(url.indexOf('#')));
+      expect(parsed.name).toBe('my plan');
+      expect(parsed.state?.level).toBe(10);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('conflict with a NAMED link saves it under that name on overwrite', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}&n=from-link` });
+    const ls = fakeStorage();
+    saveCurrent(ls as unknown as Storage, localState);
+    vi.stubGlobal('localStorage', ls);
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: vi.fn() });
+    try {
+      const s = new UrlState();
+      expect(s.pendingConflict).not.toBeNull();
+      s.resolveConflict(false);
+      expect(s.activeSave).toBe('from-link');
+      const saves = loadSaves(ls as unknown as Storage);
+      expect(saves).toHaveLength(1);
+      expect(saves[0].name).toBe('from-link');
+      expect(saves[0].state.level).toBe(linkState.level);
+      expect(loadCurrent(ls as unknown as Storage)?.level).toBe(linkState.level);
     } finally {
       vi.unstubAllGlobals();
     }

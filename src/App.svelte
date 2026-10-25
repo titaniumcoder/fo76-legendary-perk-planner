@@ -1,6 +1,7 @@
 <script lang="ts">
   import { computePlan } from './lib/planner/planner';
-  import { urlState } from './lib/state/urlState.svelte';
+  import { urlState, EMPTY_WIRE } from './lib/state/urlState.svelte';
+  import { encodeState } from './lib/utils/codec';
   import InputPanel from './components/InputPanel.svelte';
   import ProjectionPanel from './components/ProjectionPanel.svelte';
   import CardPicker from './components/CardPicker.svelte';
@@ -10,6 +11,10 @@
   import SaveDrawer from './components/SaveDrawer.svelte';
 
   let copied = $state(false);
+  let savesOpen = $state(false);
+
+  // a state that differs from the defaults but has no name yet is unsaved
+  const hasContent = $derived(encodeState(urlState.snapshot()) !== EMPTY_WIRE);
 
   const plan = $derived(
     computePlan({
@@ -41,11 +46,21 @@
     <div class="sub">FALLOUT 76 · LEVEL → PERK COIN → 4★</div>
   </div>
   <div class="actions">
-    <span
-      class="chip"
-      class:link={urlState.origin === 'link'}
-      title={urlState.origin === 'link' ? 'Viewing a shared link — the URL cleans up on your first edit' : 'Your state is saved in this browser (localStorage)'}
-    >{urlState.origin === 'link' ? 'viewing link' : 'saved locally'}</span>
+    {#if urlState.pendingConflict === null}
+      {#if urlState.activeSave}
+        <span
+          class="chip"
+          title="Your state is saved and kept in sync under “{urlState.activeSave}” in this browser"
+        >saved locally</span>
+      {:else if hasContent}
+        <button
+          class="chip unsaved"
+          title="Your current state is not saved yet — it only lives in this browser. Click to name it."
+          onclick={() => (savesOpen = true)}
+        >not saved</button>
+      {/if}
+    {/if}
+    <SaveDrawer bind:open={savesOpen} />
     <button
       class="modetoggle"
       class:live={urlState.mode === 'regular'}
@@ -148,9 +163,13 @@
     white-space: nowrap;
     margin-right: 10px;
   }
-  .chip.link {
-    color: var(--accent);
-    border-color: var(--accent);
+  .chip.unsaved {
+    color: #e8b45a;
+    border-color: #a97e2f;
+  }
+  .chip.unsaved:hover {
+    border-color: #e8b45a;
+    color: #ffd47a;
   }
   main {
     display: grid;

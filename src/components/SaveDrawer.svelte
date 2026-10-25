@@ -3,7 +3,7 @@
   import { SAVES_KEY, type NamedSave } from '../lib/state/storage';
   import type { AppState } from '../lib/utils/codec';
 
-  let open = $state(false);
+  let { open = $bindable(false) }: { open?: boolean } = $props();
   let saves = $state<NamedSave[]>([]);
   let name = $state('');
   let nameInput = $state<HTMLInputElement | null>(null);
@@ -93,7 +93,7 @@
       {#if active}
         <p class="hint">“{active}” updates as you play — save under a new name to keep a copy.</p>
       {:else if saves.length}
-        <p class="hint">Click a save to keep it in sync as you play.</p>
+        <p class="hint">Your current state has no name yet — name it above or click a save to keep it in sync.</p>
       {/if}
       {#if saves.length === 0}
         <p class="empty">No saved plans yet.</p>
