@@ -1,6 +1,6 @@
 <script lang="ts">
   import { urlState } from '../lib/state/urlState.svelte';
-  import type { NamedSave } from '../lib/state/storage';
+  import { SAVES_KEY, type NamedSave } from '../lib/state/storage';
 
   let open = $state(false);
   let saves = $state<NamedSave[]>([]);
@@ -8,8 +8,23 @@
   /** two-step confirm: set to the name awaiting an overwrite click */
   let confirmOverwrite = $state<string | null>(null);
 
+  function refresh() {
+    saves = urlState.listSaves();
+  }
+
+  /** another tab may have updated the saves */
+  function onStorage(e: StorageEvent) {
+    if (e.key === SAVES_KEY || e.key === null) refresh();
+  }
+
+  // while open, keep the listing fresh: re-read on open, after any working-state
+  // change, and when another tab writes localStorage
   $effect(() => {
-    if (open) saves = urlState.listSaves();
+    if (!open) return;
+    void urlState.snapshot();
+    refresh();
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   });
 
   function doSave() {
@@ -22,7 +37,7 @@
     urlState.saveAs(trimmed);
     name = '';
     confirmOverwrite = null;
-    saves = urlState.listSaves();
+    refresh();
   }
 
   function load(n: string) {

@@ -40,6 +40,12 @@
       />
       <button
         class="lvlup"
+        onclick={() => urlState.levelDown()}
+        disabled={urlState.level <= 1}
+        title="Level down: correction for a misclick — takes back the income this level granted (coins clamp at 0)."
+      >−1</button>
+      <button
+        class="lvlup"
         onclick={() => urlState.levelUp()}
         disabled={urlState.level >= MAX_LEVEL}
         title="Level up: gain the coins for the next level — buying ranks stays manual. Use ✓ in the plan timeline to fast-forward to a plan point."

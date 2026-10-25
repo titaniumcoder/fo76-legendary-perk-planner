@@ -300,6 +300,17 @@ export class UrlState {
     });
   }
 
+  /** one level down: correction for a misclick — takes back the income that
+   *  entering this level granted (clamped at 0 coins) */
+  levelDown() {
+    if (this.level <= 1) return;
+    const prev = this.level - 1;
+    this.#record(`Level → ${prev}`, () => {
+      this.coins = Math.max(0, this.coins - incomeForLevel(this.level, this.assumptions, prev));
+      this.level = prev;
+    });
+  }
+
   /** hand-entered level (committed on blur), clamped to 1..MAX_LEVEL */
   setLevel(level: number) {
     const n = Math.min(MAX_LEVEL, Math.max(1, Math.floor(level) || 1));

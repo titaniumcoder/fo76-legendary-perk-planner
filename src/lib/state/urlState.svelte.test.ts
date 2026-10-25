@@ -61,6 +61,34 @@ describe('urlState', () => {
     expect(urlState.rankOf('ammo-factory')).toBe(1);
   });
 
+  it('levelDown reverses the income of entering the level — including the LVL 50 bonus', () => {
+    urlState.level = 49;
+    urlState.slots = 6;
+    urlState.coins = 10;
+    urlState.order = [];
+    urlState.levelUp();
+    expect(urlState.level).toBe(50);
+    const coinsAt50 = urlState.coins;
+    expect(coinsAt50).toBe(70); // 10 on hand + 60 income for entering LVL 50 (pick + 50 bonus)
+    urlState.levelDown();
+    expect(urlState.level).toBe(49);
+    expect(urlState.coins).toBe(10);
+  });
+
+  it('levelDown clamps coins at 0 and is a no-op at level 1', () => {
+    urlState.level = 20;
+    urlState.coins = 0;
+    urlState.order = [];
+    urlState.levelUp(); // gains income
+    urlState.coins = 0; // then drop the coins by hand
+    urlState.levelDown();
+    expect(urlState.level).toBe(20);
+    expect(urlState.coins).toBe(0);
+    urlState.level = 1;
+    urlState.levelDown();
+    expect(urlState.level).toBe(1);
+  });
+
   it('canBuy: affordable + equipped + not maxed', () => {
     urlState.level = 300;
     urlState.slots = 6;
