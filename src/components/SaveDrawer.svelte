@@ -1,6 +1,7 @@
 <script lang="ts">
   import { urlState } from '../lib/state/urlState.svelte';
   import { SAVES_KEY, type NamedSave } from '../lib/state/storage';
+  import type { AppState } from '../lib/utils/codec';
 
   let open = $state(false);
   let saves = $state<NamedSave[]>([]);
@@ -10,6 +11,9 @@
   let confirmOverwrite = $state<string | null>(null);
 
   const active = $derived(urlState.activeSave);
+  /** the linked save mirrors the working state — show it instantly instead of
+   *  waiting for the debounced localStorage write to catch up */
+  const live = $derived(urlState.snapshot());
 
   function refresh() {
     saves = urlState.listSaves();
@@ -60,8 +64,8 @@
     return ts ? new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
   }
 
-  function summary(s: NamedSave): string {
-    return `LVL ${s.state.level} · ${s.state.order.length} card${s.state.order.length === 1 ? '' : 's'}`;
+  function summary(s: AppState): string {
+    return `LVL ${s.level} · ${s.order.length} card${s.order.length === 1 ? '' : 's'}`;
   }
 </script>
 
@@ -105,7 +109,7 @@
                   {s.name}
                   {#if s.name === active}<span class="tag">live</span>{/if}
                 </span>
-                <span class="meta">{summary(s)}{s.savedAt ? ` · ${fmt(s.savedAt)}` : ''}</span>
+                <span class="meta">{summary(s.name === active ? live : s.state)}{s.savedAt ? ` · ${fmt(s.savedAt)}` : ''}</span>
               </button>
               <button class="del" title={`Delete ${s.name}`} onclick={() => del(s.name)}>✕</button>
             </li>

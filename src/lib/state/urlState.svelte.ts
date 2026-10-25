@@ -90,7 +90,7 @@ export class UrlState {
   /** true while the active state came from a link; the hash is stripped on the first edit */
   #fromLink = false;
   /** name of the linked (live) save: auto-updated on every persisted change */
-  #activeSave: string | null = null;
+  #activeSave = $state<string | null>(null);
   #adopting = false;
 
   get activeSave(): string | null {
