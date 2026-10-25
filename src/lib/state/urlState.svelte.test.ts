@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { urlState, UrlState } from './urlState.svelte';
-import { decodeState, encodeState } from '../utils/codec';
+import { decodeState, encodeState, type AppState } from '../utils/codec';
+import { loadCurrent, saveCurrent } from './storage';
 import { computePlan, type PlanEvent } from '../planner/planner';
 import { DEFAULT_ASSUMPTIONS, MAX_LEVEL } from '../planner/rules';
 
@@ -13,6 +14,21 @@ function fakeStorage() {
     clear: () => store.clear(),
   };
 }
+
+/** a state that arrives via a shared link in the startup tests */
+const linkState: AppState = {
+  level: 10,
+  slots: 2,
+  coins: 40,
+  order: ['ammo-factory'],
+  ranks: { 'ammo-factory': 1 },
+  assumptions: { ...DEFAULT_ASSUMPTIONS },
+  faction: 'human',
+  mode: 'setup',
+};
+
+/** a different state that already lives in localStorage */
+const localState: AppState = { ...linkState, level: 20, coins: 90 };
 
 describe('urlState', () => {
   it('defaults: level 1, slots 6, empty plan', () => {
@@ -145,25 +161,80 @@ describe('urlState', () => {
     urlState.order = [];
   });
 
-  it('syncToUrl replaces the current history entry — it never pushes', () => {
+  it('persist saves to localStorage and never writes the URL', () => {
     vi.useFakeTimers();
     const push = vi.fn();
     const replace = vi.fn();
     vi.stubGlobal('history', { pushState: push, replaceState: replace });
+    vi.stubGlobal('localStorage', fakeStorage());
     try {
       urlState.level = 123;
-      urlState.syncToUrl();
+      urlState.persist();
       vi.advanceTimersByTime(250);
-      expect(replace).toHaveBeenCalledTimes(1);
       expect(push).not.toHaveBeenCalled();
-      expect(String(replace.mock.calls[0][2])).toMatch(/^#s=/);
+      expect(replace).not.toHaveBeenCalled();
+      expect(loadCurrent(localStorage as unknown as Storage)?.level).toBe(123);
     } finally {
       vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
 
-  it('reset pushes a fresh history entry so Back restores the pre-reset plan', () => {
+  it('persist is a no-op when nothing changed', () => {
+    vi.useFakeTimers();
+    const ls = fakeStorage();
+    vi.stubGlobal('localStorage', ls);
+    try {
+      const saved = loadCurrent(ls);
+      urlState.persist();
+      vi.advanceTimersByTime(250);
+      // unchanged snapshot → nothing new written (the encoded state matches the
+      // last persisted one, or the singleton was never edited in this test run)
+      expect(loadCurrent(ls) ?? null).toEqual(saved);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('first edit after loading a link strips the hash and saves locally', () => {
+    vi.useFakeTimers();
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: replace });
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    vi.stubGlobal('localStorage', fakeStorage());
+    try {
+      const fromLink = new UrlState();
+      expect(fromLink.origin).toBe('link');
+      fromLink.level = 100; // first edit
+      fromLink.persist();
+      vi.advanceTimersByTime(250);
+      expect(replace).toHaveBeenCalledTimes(1);
+      expect(String(replace.mock.calls[0][2])).toBe('/planner'); // clean URL, no hash
+      expect(fromLink.origin).toBe('local');
+      expect(loadCurrent(localStorage as unknown as Storage)?.level).toBe(100);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a link-only load keeps the hash until the first edit', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    vi.stubGlobal('localStorage', fakeStorage());
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: replace });
+    try {
+      const fromLink = new UrlState();
+      expect(fromLink.origin).toBe('link');
+      expect(fromLink.level).toBe(linkState.level);
+      expect(replace).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reset clears the plan and never touches the URL', () => {
     const push = vi.fn();
     const replace = vi.fn();
     vi.stubGlobal('history', { pushState: push, replaceState: replace });
@@ -173,12 +244,87 @@ describe('urlState', () => {
       urlState.ranks = { 'ammo-factory': 2 };
       urlState.coins = 100;
       urlState.reset();
-      expect(push).toHaveBeenCalledTimes(1);
+      expect(push).not.toHaveBeenCalled();
       expect(replace).not.toHaveBeenCalled();
-      const state = decodeState(String(push.mock.calls[0][2]));
-      expect(state?.order).toEqual([]);
-      expect(state?.coins).toBe(0);
-      expect(state?.level).toBe(100);
+      const state = urlState.snapshot();
+      expect(state.order).toEqual([]);
+      expect(state.coins).toBe(0);
+      expect(state.level).toBe(100);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('resolveConflict(true) adopts the local state and clears the URL', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    const ls = fakeStorage();
+    saveCurrent(ls as unknown as Storage, localState);
+    vi.stubGlobal('localStorage', ls);
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: replace });
+    try {
+      const s = new UrlState();
+      expect(s.pendingConflict).not.toBeNull();
+      s.resolveConflict(true);
+      expect(s.pendingConflict).toBeNull();
+      expect(s.origin).toBe('local');
+      expect(s.level).toBe(localState.level);
+      expect(String(replace.mock.calls[0][2])).toBe('/planner');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('resolveConflict(false) keeps the link state and overwrites the local slot', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    const ls = fakeStorage();
+    saveCurrent(ls as unknown as Storage, localState);
+    vi.stubGlobal('localStorage', ls);
+    const replace = vi.fn();
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: replace });
+    try {
+      const s = new UrlState();
+      expect(s.pendingConflict).not.toBeNull();
+      s.resolveConflict(false);
+      vi.advanceTimersByTime(250);
+      expect(s.pendingConflict).toBeNull();
+      expect(s.level).toBe(linkState.level);
+      expect(loadCurrent(ls as unknown as Storage)?.level).toBe(linkState.level); // local overwritten
+      expect(replace).not.toHaveBeenCalled(); // hash stays until the first edit
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('named saves round-trip through the state', () => {
+    vi.stubGlobal('localStorage', fakeStorage());
+    try {
+      urlState.level = 250;
+      urlState.order = ['ammo-factory'];
+      urlState.ranks = { 'ammo-factory': 3 };
+      expect(urlState.listSaves()).toEqual([]);
+      const first = urlState.saveAs('main');
+      expect(first.replaced).toBe(false);
+      expect(urlState.listSaves()).toHaveLength(1);
+
+      const second = urlState.saveAs('main');
+      expect(second.replaced).toBe(true);
+      expect(urlState.listSaves()).toHaveLength(1);
+
+      // scramble the working state, then restore from the save
+      urlState.level = 1;
+      urlState.order = [];
+      urlState.ranks = {};
+      expect(urlState.loadSave('main')).toBe(true);
+      expect(urlState.level).toBe(250);
+      expect(urlState.rankOf('ammo-factory')).toBe(3);
+      expect(urlState.undoDepth).toBe(0); // loading a save clears the log
+
+      expect(urlState.loadSave('missing')).toBe(false);
+      urlState.deleteSave('main');
+      expect(urlState.listSaves()).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
     }

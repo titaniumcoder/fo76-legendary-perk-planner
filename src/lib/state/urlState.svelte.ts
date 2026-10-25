@@ -2,6 +2,16 @@ import { DEFAULT_ASSUMPTIONS, MAX_LEVEL, MAX_RANK, RANK_UP_COSTS, incomeForLevel
 import { equippedCardIds, type PlanEvent, type PlannerCard } from '../planner/planner';
 import { PERK_BY_ID } from '../data/legendaryPerks';
 import { clampRank, decodeState, encodeState, type AppState, type Faction, type Mode } from '../utils/codec';
+import {
+  loadCurrent,
+  loadSaves,
+  removeSave,
+  resolveStartup,
+  saveCurrent,
+  saveSaves,
+  upsertSave,
+  type NamedSave,
+} from './storage';
 
 const DEBOUNCE_MS = 200;
 
@@ -39,9 +49,7 @@ function normalize(s: AppState): AppState {
   return { ...s, order, ranks };
 }
 
-function initialState(): AppState {
-  const fromUrl = typeof location !== 'undefined' ? decodeState(location.hash) : null;
-  if (fromUrl) return normalize(fromUrl);
+function defaultState(): AppState {
   return {
     level: 1,
     slots: 6,
@@ -64,25 +72,43 @@ export class UrlState {
   faction = $state<Faction>('human');
   mode = $state<Mode>('setup');
 
+  /** where the active state came from: a shared link or local storage */
+  origin = $state<'link' | 'local'>('local');
+  /** set at startup when a link and a differing local state both exist */
+  pendingConflict = $state<{ link: AppState; local: AppState } | null>(null);
+
   #undoStack: SessionAction[] = [];
   #redoStack: SessionAction[] = [];
   undoDepth = $state(0);
   redoDepth = $state(0);
 
   #timer: ReturnType<typeof setTimeout> | undefined;
-  #lastWritten = '';
+  /** encoded snapshot as last written to localStorage — skips no-op persists */
+  #lastPersisted = '';
+  /** true while the active state came from a link; the hash is stripped on the first edit */
+  #fromLink = false;
   #adopting = false;
 
   constructor() {
-    const s = initialState();
-    this.level = s.level;
-    this.slots = s.slots;
-    this.coins = s.coins;
-    this.order = s.order;
-    this.ranks = s.ranks;
-    this.assumptions = s.assumptions;
-    this.faction = s.faction;
-    this.mode = s.mode;
+    const link = typeof location !== 'undefined' ? decodeState(location.hash) : null;
+    const local = typeof localStorage !== 'undefined' ? loadCurrent(localStorage) : null;
+    const res = resolveStartup({ link: link ? normalize(link) : null, local });
+    let s: AppState;
+    if (res.action === 'default') {
+      s = defaultState();
+    } else if (res.action === 'ask') {
+      // preview the link state; the modal decides what is kept
+      s = res.link;
+      this.origin = 'link';
+      this.#fromLink = true;
+      this.pendingConflict = { link: res.link, local: res.local };
+    } else {
+      s = res.state;
+      this.origin = res.action === 'load-url' ? 'link' : 'local';
+      this.#fromLink = res.action === 'load-url';
+    }
+    this.#adopt(s);
+    this.#lastPersisted = encodeState(s);
     this.#loadHistory();
 
     if (typeof window !== 'undefined') {
@@ -183,23 +209,33 @@ export class UrlState {
   #adoptFromUrl() {
     const s = typeof location !== 'undefined' ? decodeState(location.hash) : null;
     if (!s) return;
-    const encoded = encodeState(s);
-    if (encoded === this.#lastWritten) return;
-    this.#adopting = true;
     this.#adopt(normalize(s));
-    this.#adopting = false;
-    this.#lastWritten = encoded;
+    this.#fromLink = true;
+    this.origin = 'link';
+    this.#lastPersisted = encodeState(this.snapshot());
   }
 
-  /** write current state into the URL (debounced, replaceState — no history spam) */
-  syncToUrl() {
-    if (this.#adopting || typeof history === 'undefined') return;
+  #clearHash() {
+    if (typeof history === 'undefined' || typeof location === 'undefined') return;
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+
+  /** persist edits to localStorage (debounced); strips a link hash on the first edit */
+  persist() {
+    if (this.#adopting || typeof localStorage === 'undefined') return;
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => {
-      const hash = `#s=${encodeState(this.snapshot())}`;
-      if (hash === this.#lastWritten) return;
-      this.#lastWritten = hash;
-      history.replaceState(null, '', hash);
+      if (typeof localStorage === 'undefined') return;
+      const s = this.snapshot();
+      const encoded = encodeState(s);
+      if (encoded === this.#lastPersisted) return;
+      if (this.#fromLink) {
+        this.#fromLink = false;
+        this.#clearHash();
+      }
+      saveCurrent(localStorage, s);
+      this.#lastPersisted = encoded;
+      this.origin = 'local';
     }, DEBOUNCE_MS);
   }
 
@@ -363,9 +399,9 @@ export class UrlState {
     this.order = arr;
   }
 
-  /** clears the plan but keeps level, slots and faction. Unlike regular edits
-   *  (replaceState), reset pushes a fresh history entry so Back restores the
-   *  pre-reset plan. */
+  /** clears the plan but keeps level, slots and faction; persistence (and
+   *  hash stripping when link-loaded) happens via persist(). Also clears the
+   *  undo/redo log, like loading a save. */
   reset() {
     this.#undoStack = [];
     this.#redoStack = [];
@@ -374,11 +410,67 @@ export class UrlState {
     this.order = [];
     this.ranks = {};
     this.coins = 0;
-    clearTimeout(this.#timer);
-    if (typeof history === 'undefined') return;
-    const hash = `#s=${encodeState(this.snapshot())}`;
-    this.#lastWritten = hash;
-    history.pushState(null, '', hash);
+  }
+
+  /** startup conflict: use the saved local state, or adopt the link (and
+   *  overwrite the local state with it) */
+  resolveConflict(useLocal: boolean) {
+    const c = this.pendingConflict;
+    if (!c) return;
+    this.pendingConflict = null;
+    if (useLocal) {
+      this.#adopt(c.local);
+      this.#fromLink = false;
+      this.origin = 'local';
+      this.#lastPersisted = encodeState(c.local);
+      this.#clearHash();
+    } else {
+      // the link state is already adopted; overwrite the local slot with it.
+      // the hash stays until the first edit (this overwrite is not an edit).
+      const s = this.snapshot();
+      this.origin = 'local';
+      if (typeof localStorage !== 'undefined') saveCurrent(localStorage, s);
+      this.#lastPersisted = encodeState(s);
+    }
+  }
+
+  // --- named saves ----------------------------------------------------------
+
+  listSaves(): NamedSave[] {
+    if (typeof localStorage === 'undefined') return [];
+    return loadSaves(localStorage);
+  }
+
+  /** save the current state under a name; returns the list and whether an existing save was replaced */
+  saveAs(name: string): { replaced: boolean; saves: NamedSave[] } {
+    if (typeof localStorage === 'undefined' || !name.trim()) return { replaced: false, saves: this.listSaves() };
+    const up = upsertSave(loadSaves(localStorage), name, this.snapshot());
+    saveSaves(localStorage, up.saves);
+    return { replaced: up.replaced, saves: up.saves };
+  }
+
+  /** adopt a named save; not undoable (clears the log, like reset) */
+  loadSave(name: string): boolean {
+    if (typeof localStorage === 'undefined') return false;
+    const save = loadSaves(localStorage).find((sv) => sv.name === name);
+    if (!save) return false;
+    this.#undoStack = [];
+    this.#redoStack = [];
+    this.#syncDepths();
+    this.#persistHistory();
+    this.#adopt(normalize(save.state));
+    this.#fromLink = false;
+    this.origin = 'local';
+    this.#lastPersisted = encodeState(save.state);
+    this.#clearHash();
+    return true;
+  }
+
+  deleteSave(name: string): NamedSave[] {
+    if (typeof localStorage === 'undefined') return [];
+    const saves = removeSave(loadSaves(localStorage), name);
+    saveSaves(localStorage, saves);
+    return saves;
   }
 
   currentUrl(): string {

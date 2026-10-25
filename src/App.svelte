@@ -6,6 +6,8 @@
   import CardPicker from './components/CardPicker.svelte';
   import SlotBoard from './components/SlotBoard.svelte';
   import PlanTimeline from './components/PlanTimeline.svelte';
+  import ConflictModal from './components/ConflictModal.svelte';
+  import SaveDrawer from './components/SaveDrawer.svelte';
 
   let copied = $state(false);
 
@@ -22,7 +24,7 @@
 
   $effect(() => {
     void urlState.snapshot();
-    urlState.syncToUrl();
+    urlState.persist();
   });
 
   function copyLink() {
@@ -46,7 +48,13 @@
       title={urlState.mode === 'regular' ? 'Regular mode: buying ranks costs real perk coins. Click to switch back to setup.' : 'Setup mode: set ranks freely. Click to switch to regular mode (buying costs coins).'}
       onclick={() => urlState.setMode(urlState.mode === 'regular' ? 'setup' : 'regular')}
     >Mode: {urlState.mode === 'regular' ? 'Regular' : 'Setup'}</button>
-    <button onclick={copyLink}>{copied ? 'Copied!' : 'Copy plan link'}</button>
+    <span
+      class="chip"
+      class:link={urlState.origin === 'link'}
+      title={urlState.origin === 'link' ? 'Viewing a shared link — the URL cleans up on your first edit' : 'Your state is saved in this browser (localStorage)'}
+    >{urlState.origin === 'link' ? 'viewing link' : 'saved locally'}</span>
+    <SaveDrawer />
+    <button onclick={copyLink}>{copied ? 'Copied!' : 'Share link'}</button>
     <button
       disabled={!urlState.canUndo}
       title={urlState.nextUndoLabel()
@@ -76,6 +84,8 @@
     <CardPicker />
   </section>
 </main>
+
+<ConflictModal />
 
 <footer>
   Fan tool, not affiliated with Bethesda or ZeniMax. Rules verified against Update 22 patch notes &amp; Nukapedia · scoreboards are not simulated — account for them via coins on hand.
@@ -112,6 +122,20 @@
     background: linear-gradient(to bottom, #3a3320, #2a2517);
     border-color: var(--accent);
     color: var(--accent);
+  }
+  .chip {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    border: 1px solid var(--border-dim);
+    border-radius: 999px;
+    padding: 4px 10px;
+    white-space: nowrap;
+  }
+  .chip.link {
+    color: var(--accent);
+    border-color: var(--accent);
   }
   main {
     display: grid;
