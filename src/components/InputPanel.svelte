@@ -85,6 +85,16 @@
       />
       <button
         class="lvlup"
+        onclick={() => urlState.addCoins(-2)}
+        title="Take away 2 perk coins — small correction, coins clamp at 0."
+      >−2</button>
+      <button
+        class="lvlup"
+        onclick={() => urlState.addCoins(2)}
+        title="Add 2 perk coins — small correction."
+      >+2</button>
+      <button
+        class="lvlup"
         onclick={() => urlState.addCoins(25)}
         title="Add 25 perk coins (typical scoreboard/challenge reward)"
       >+25</button>
