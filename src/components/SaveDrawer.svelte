@@ -5,8 +5,11 @@
   let open = $state(false);
   let saves = $state<NamedSave[]>([]);
   let name = $state('');
+  let nameInput = $state<HTMLInputElement | null>(null);
   /** two-step confirm: set to the name awaiting an overwrite click */
   let confirmOverwrite = $state<string | null>(null);
+
+  const active = $derived(urlState.activeSave);
 
   function refresh() {
     saves = urlState.listSaves();
@@ -29,7 +32,10 @@
 
   function doSave() {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) {
+      nameInput?.focus();
+      return;
+    }
     if (saves.some((s) => s.name === trimmed) && confirmOverwrite !== trimmed) {
       confirmOverwrite = trimmed;
       return;
@@ -71,22 +77,34 @@
       <div class="row">
         <input
           type="text"
-          placeholder="Save name…"
+          placeholder="New save name…"
           bind:value={name}
+          bind:this={nameInput}
           onkeydown={(e) => e.key === 'Enter' && doSave()}
         />
         <button class="primary" onclick={doSave}>
           {confirmOverwrite && confirmOverwrite === name.trim() ? 'Overwrite?' : 'Save'}
         </button>
       </div>
+      {#if active}
+        <p class="hint">“{active}” updates as you play — save under a new name to keep a copy.</p>
+      {/if}
       {#if saves.length === 0}
         <p class="empty">No saved plans yet.</p>
       {:else}
         <ul>
           {#each saves as s (s.name)}
             <li>
-              <button class="loadbtn" title={`Load ${s.name}`} onclick={() => load(s.name)}>
-                <span class="name">{s.name}</span>
+              <button
+                class="loadbtn"
+                class:active={s.name === active}
+                title={s.name === active ? `${s.name} — linked: auto-updates as you play` : `Load ${s.name}`}
+                onclick={() => load(s.name)}
+              >
+                <span class="name">
+                  {s.name}
+                  {#if s.name === active}<span class="tag">live</span>{/if}
+                </span>
                 <span class="meta">{summary(s)}{s.savedAt ? ` · ${fmt(s.savedAt)}` : ''}</span>
               </button>
               <button class="del" title={`Delete ${s.name}`} onclick={() => del(s.name)}>✕</button>
@@ -159,13 +177,30 @@
   .loadbtn:hover {
     border-color: var(--accent);
   }
+  .loadbtn.active {
+    border-color: var(--accent);
+  }
   .name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     font-size: 13px;
     color: var(--text);
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .tag {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent-dim);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
+  .hint {
+    margin: 0 0 8px;
+    font-size: 11px;
+    color: var(--text-faint);
   }
   .meta {
     font-size: 11px;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { urlState, UrlState } from './urlState.svelte';
 import { decodeState, encodeState, type AppState } from '../utils/codec';
-import { loadCurrent, saveCurrent } from './storage';
+import { loadActiveName, loadCurrent, saveCurrent, saveActiveName, CURRENT_KEY } from './storage';
 import { computePlan, type PlanEvent } from '../planner/planner';
 import { DEFAULT_ASSUMPTIONS, MAX_LEVEL } from '../planner/rules';
 
@@ -353,6 +353,83 @@ describe('urlState', () => {
       expect(urlState.loadSave('missing')).toBe(false);
       urlState.deleteSave('main');
       expect(urlState.listSaves()).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('saveAs links the save: edits auto-update the named entry (live)', () => {
+    vi.useFakeTimers();
+    const ls = fakeStorage();
+    vi.stubGlobal('localStorage', ls);
+    try {
+      urlState.level = 100;
+      urlState.order = [];
+      urlState.ranks = {};
+      urlState.saveAs('main');
+      expect(urlState.activeSave).toBe('main');
+      expect(loadActiveName(ls)).toBe('main');
+
+      urlState.level = 130;
+      urlState.persist();
+      vi.advanceTimersByTime(250);
+
+      const entry = urlState.listSaves().find((s) => s.name === 'main');
+      expect(entry?.state.level).toBe(130); // live: follows the working state
+      expect(loadCurrent(ls)?.level).toBe(130);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('loadSave links the save; link adoption unlinks it', () => {
+    vi.useFakeTimers();
+    const ls = fakeStorage();
+    vi.stubGlobal('localStorage', ls);
+    try {
+      urlState.level = 90;
+      urlState.order = [];
+      urlState.ranks = {};
+      urlState.saveAs('main');
+
+      urlState.level = 1;
+      expect(urlState.loadSave('main')).toBe(true);
+      expect(urlState.activeSave).toBe('main');
+
+      // deleting the linked save unlinks it
+      urlState.deleteSave('main');
+      expect(urlState.activeSave).toBeNull();
+      expect(loadActiveName(ls)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('conflict: use local keeps the link, load link & overwrite unlinks it', () => {
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    const ls = fakeStorage();
+    saveCurrent(ls as unknown as Storage, localState);
+    saveActiveName(ls as unknown as Storage, 'local-save');
+    vi.stubGlobal('localStorage', ls);
+    vi.stubGlobal('history', { pushState: vi.fn(), replaceState: vi.fn() });
+    try {
+      const s = new UrlState();
+      expect(s.pendingConflict).not.toBeNull();
+      s.resolveConflict(true);
+      expect(s.activeSave).toBe('local-save'); // local state = that save's content
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    vi.stubGlobal('location', { pathname: '/planner', search: '', hash: `#s=${encodeState(linkState)}` });
+    vi.stubGlobal('localStorage', ls);
+    try {
+      const s = new UrlState();
+      s.resolveConflict(false);
+      expect(s.activeSave).toBeNull(); // link state is not the named save
+      expect(loadActiveName(ls)).toBeNull();
     } finally {
       vi.unstubAllGlobals();
     }

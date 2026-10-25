@@ -3,10 +3,12 @@ import { equippedCardIds, type PlanEvent, type PlannerCard } from '../planner/pl
 import { PERK_BY_ID } from '../data/legendaryPerks';
 import { clampRank, decodeState, encodeState, type AppState, type Faction, type Mode } from '../utils/codec';
 import {
+  loadActiveName,
   loadCurrent,
   loadSaves,
   removeSave,
   resolveStartup,
+  saveActiveName,
   saveCurrent,
   saveSaves,
   upsertSave,
@@ -87,15 +89,30 @@ export class UrlState {
   #lastPersisted = '';
   /** true while the active state came from a link; the hash is stripped on the first edit */
   #fromLink = false;
+  /** name of the linked (live) save: auto-updated on every persisted change */
+  #activeSave: string | null = null;
   #adopting = false;
+
+  get activeSave(): string | null {
+    return this.#activeSave;
+  }
+
+  /** break the live link (state no longer matches the named save) */
+  #unlinkActive() {
+    this.#activeSave = null;
+    if (typeof localStorage !== 'undefined') saveActiveName(localStorage, null);
+  }
 
   constructor() {
     const link = typeof location !== 'undefined' ? decodeState(location.hash) : null;
     const local = typeof localStorage !== 'undefined' ? loadCurrent(localStorage) : null;
     const res = resolveStartup({ link: link ? normalize(link) : null, local });
+    this.#activeSave = typeof localStorage !== 'undefined' ? loadActiveName(localStorage) : null;
     let s: AppState;
     if (res.action === 'default') {
       s = defaultState();
+      // fresh start: nothing links to a named save yet
+      this.#unlinkActive();
     } else if (res.action === 'ask') {
       // preview the link state; the modal decides what is kept
       s = res.link;
@@ -106,6 +123,8 @@ export class UrlState {
       s = res.state;
       this.origin = res.action === 'load-url' ? 'link' : 'local';
       this.#fromLink = res.action === 'load-url';
+      // link-loaded states are not tied to a named save
+      if (res.action === 'load-url') this.#unlinkActive();
     }
     this.#adopt(s);
     this.#lastPersisted = encodeState(s);
@@ -205,7 +224,8 @@ export class UrlState {
     }
   }
 
-  /** adopt state coming from the URL (back button, pasted link in same tab) */
+  /** adopt state coming from the URL (back button, pasted link in same tab);
+   *  breaks the live link — the pasted state is not the named save */
   #adoptFromUrl() {
     const s = typeof location !== 'undefined' ? decodeState(location.hash) : null;
     if (!s) return;
@@ -213,6 +233,7 @@ export class UrlState {
     this.#fromLink = true;
     this.origin = 'link';
     this.#lastPersisted = encodeState(this.snapshot());
+    this.#unlinkActive();
   }
 
   #clearHash() {
@@ -220,9 +241,10 @@ export class UrlState {
     history.replaceState(null, '', location.pathname + location.search);
   }
 
-  /** persist edits to localStorage (debounced); strips a link hash on the first edit */
+  /** persist edits to localStorage (debounced); strips a link hash on the first edit.
+   *  No-ops while the conflict modal is up: the shown state is a preview, not chosen. */
   persist() {
-    if (this.#adopting || typeof localStorage === 'undefined') return;
+    if (this.#adopting || this.pendingConflict || typeof localStorage === 'undefined') return;
     clearTimeout(this.#timer);
     this.#timer = setTimeout(() => {
       if (typeof localStorage === 'undefined') return;
@@ -234,6 +256,10 @@ export class UrlState {
         this.#clearHash();
       }
       saveCurrent(localStorage, s);
+      // live save: keep the linked named entry in sync with the working state
+      if (this.#activeSave) {
+        saveSaves(localStorage, upsertSave(loadSaves(localStorage), this.#activeSave, s).saves);
+      }
       this.#lastPersisted = encoded;
       this.origin = 'local';
     }, DEBOUNCE_MS);
@@ -435,11 +461,13 @@ export class UrlState {
       this.origin = 'local';
       this.#lastPersisted = encodeState(c.local);
       this.#clearHash();
+      // keep the persisted active-save link: the local state is that save's content
     } else {
       // the link state is already adopted; overwrite the local slot with it.
       // the hash stays until the first edit (this overwrite is not an edit).
       const s = this.snapshot();
       this.origin = 'local';
+      this.#unlinkActive();
       if (typeof localStorage !== 'undefined') saveCurrent(localStorage, s);
       this.#lastPersisted = encodeState(s);
     }
@@ -452,15 +480,19 @@ export class UrlState {
     return loadSaves(localStorage);
   }
 
-  /** save the current state under a name; returns the list and whether an existing save was replaced */
+  /** save the current state under a name and link it as the live save;
+   *  returns the list and whether an existing save was replaced */
   saveAs(name: string): { replaced: boolean; saves: NamedSave[] } {
     if (typeof localStorage === 'undefined' || !name.trim()) return { replaced: false, saves: this.listSaves() };
-    const up = upsertSave(loadSaves(localStorage), name, this.snapshot());
+    const trimmed = name.trim();
+    const up = upsertSave(loadSaves(localStorage), trimmed, this.snapshot());
     saveSaves(localStorage, up.saves);
+    this.#activeSave = trimmed;
+    saveActiveName(localStorage, trimmed);
     return { replaced: up.replaced, saves: up.saves };
   }
 
-  /** adopt a named save; not undoable (clears the log, like reset) */
+  /** adopt a named save and link it as the live save; not undoable (clears the log, like reset) */
   loadSave(name: string): boolean {
     if (typeof localStorage === 'undefined') return false;
     const save = loadSaves(localStorage).find((sv) => sv.name === name);
@@ -472,6 +504,8 @@ export class UrlState {
     this.#adopt(normalize(save.state));
     this.#fromLink = false;
     this.origin = 'local';
+    this.#activeSave = name;
+    saveActiveName(localStorage, name);
     this.#lastPersisted = encodeState(save.state);
     this.#clearHash();
     return true;
@@ -479,6 +513,7 @@ export class UrlState {
 
   deleteSave(name: string): NamedSave[] {
     if (typeof localStorage === 'undefined') return [];
+    if (name === this.#activeSave) this.#unlinkActive();
     const saves = removeSave(loadSaves(localStorage), name);
     saveSaves(localStorage, saves);
     return saves;

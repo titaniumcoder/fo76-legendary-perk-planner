@@ -17,6 +17,8 @@ export interface NamedSave {
 export const CURRENT_KEY = 'fo76-perk-current';
 /** localStorage key of the named-save list (JSON). */
 export const SAVES_KEY = 'fo76-perk-saves';
+/** localStorage key of the currently linked (live) save's name. */
+export const ACTIVE_KEY = 'fo76-perk-active';
 
 /** states are equal iff their canonical encoded wires match */
 export function stateEquals(a: AppState, b: AppState): boolean {
@@ -94,6 +96,26 @@ export function upsertSave(
 /** pure: drop the save with this name */
 export function removeSave(saves: NamedSave[], name: string): NamedSave[] {
   return saves.filter((sv) => sv.name !== name);
+}
+
+// --- active (live) save link -------------------------------------------------
+
+export function loadActiveName(s: StorageLike): string | null {
+  try {
+    return s.getItem(ACTIVE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveActiveName(s: StorageLike, name: string | null): boolean {
+  try {
+    if (name) s.setItem(ACTIVE_KEY, name);
+    else s.removeItem(ACTIVE_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- startup resolution ------------------------------------------------------
