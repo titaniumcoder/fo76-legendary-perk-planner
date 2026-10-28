@@ -60,7 +60,6 @@
         >not saved</button>
       {/if}
     {/if}
-    <SaveDrawer bind:open={savesOpen} />
     <button
       class="modetoggle"
       class:live={urlState.mode === 'regular'}
@@ -68,7 +67,7 @@
       title={urlState.mode === 'regular' ? 'Regular mode: buying ranks costs real perk coins. Click to switch back to setup.' : 'Setup mode: set ranks freely. Click to switch to regular mode (buying costs coins).'}
       onclick={() => urlState.setMode(urlState.mode === 'regular' ? 'setup' : 'regular')}
     >Mode: {urlState.mode === 'regular' ? 'Regular' : 'Setup'}</button>
-    <SaveDrawer />
+    <SaveDrawer bind:open={savesOpen} />
     <button onclick={copyLink}>{copied ? 'Copied!' : 'Share link'}</button>
     <button
       disabled={!urlState.canUndo}
